@@ -37,6 +37,7 @@ import { isIPv6 } from './is-ipv6'
 import { AsyncCallbackSet } from './async-callback-set'
 import type { NextServer } from '../next'
 import type { ConfiguredExperimentalFeature } from '../config'
+import { wait } from '../../lib/wait'
 
 const debug = setupDebug('next:start-server')
 let startServerSpan: Span | undefined
@@ -396,6 +397,9 @@ export async function startServer(
           cleanupStarted = true
           ;(async () => {
             debug('start-server process cleanup')
+
+            const delay = Number(process.env.NEXT_DELAY_SIG_HANDLE) || 0
+            if (delay) await wait(delay)
 
             // first, stop accepting new connections and finish pending requests,
             // because they might affect `nextServer.close()` (e.g. by scheduling an `after`)

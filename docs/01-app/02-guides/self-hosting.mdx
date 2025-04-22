@@ -267,3 +267,19 @@ if (process.env.NEXT_MANUAL_SIG_HANDLE) {
 ```
 
 </PagesOnly>
+
+## Delay Graceful Shutdowns
+
+Next.js will listen for `SIGINT` and `SIGTERM` and perform a graceful shutdown. If you need to delay handling those signals - e.g. to let your Kubernetes readiness probe report “not ready” before the process exits - you can set `NEXT_DELAY_SIG_HANDLE` to a number of milliseconds.
+
+> **Good to know**: Delaying signal handling is not available in `next dev`.
+
+```json filename="package.json"
+{
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "NEXT_DELAY_SIG_HANDLE=10000 next start"
+  }
+}
+```
