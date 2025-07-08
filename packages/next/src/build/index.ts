@@ -210,6 +210,9 @@ import {
   sortPages,
   sortSortableRouteObjects,
 } from '../shared/lib/router/utils/sortable-routes'
+import {
+  generateValidatorFile,
+} from '../server/lib/router-utils/typegen'
 import { mkdir } from 'fs/promises'
 import {
   createRouteTypesManifest,
@@ -1387,6 +1390,13 @@ export default async function build(
           })
 
           await writeRouteTypesManifest(routeTypesManifest, routeTypesFilePath)
+
+          // Generate validator file
+          const validatorFilePath = path.join(distDir, 'types', 'validator.ts')
+          await fs.writeFile(
+            validatorFilePath,
+            generateValidatorFile(routeTypesManifest)
+          )
         })
 
       // Turbopack already handles conflicting app and page routes.

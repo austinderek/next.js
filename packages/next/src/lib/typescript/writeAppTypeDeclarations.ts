@@ -61,6 +61,9 @@ export async function writeAppTypeDeclarations({
     distDir.replaceAll(path.win32.sep, path.posix.sep),
     'types/routes.d.ts'
   )
+  directives.push(
+    `/// <reference path="./${distDir ?? '.next'}/types/validator.ts" />`
+  )
 
   directives.push(`/// <reference path="./${routeTypesPath}" />`)
 
