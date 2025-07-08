@@ -6,7 +6,11 @@ import {
 import type { NextConfigComplete } from '../../config-shared'
 import { isParallelRouteSegment } from '../../../shared/lib/segment'
 import fs from 'fs'
-import { generateRouteTypesFile, generateLinkTypesFile } from './typegen'
+import {
+  generateRouteTypesFile,
+  generateLinkTypesFile,
+  generateValidatorFile,
+} from './typegen'
 import { tryToParsePath } from '../../../lib/try-to-parse-path'
 
 interface RouteInfo {
@@ -18,10 +22,19 @@ export interface RouteTypesManifest {
   appRoutes: Record<string, RouteInfo>
   pageRoutes: Record<string, RouteInfo>
   layoutRoutes: Record<string, RouteInfo & { slots: string[] }>
+  appRouteHandlerRoutes: Record<string, RouteInfo>
   /** Map of redirect source => RouteInfo */
   redirectRoutes: Record<string, RouteInfo>
   /** Map of rewrite source => RouteInfo */
   rewriteRoutes: Record<string, RouteInfo>
+  /** File paths for validation */
+  appPagePaths: Set<string>
+  pagesRouterPagePaths: Set<string>
+  layoutPaths: Set<string>
+  appRouteHandlers: Set<string>
+  pageApiRoutes: Set<string>
+  /** Direct mapping from file paths to routes for validation */
+  filePathToRoute: Map<string, string>
 }
 
 // Convert a custom-route source string (`/blog/:slug`, `/docs/:path*`, ...)
@@ -121,6 +134,36 @@ function isCanonicalRoute(route: string) {
 }
 
 /**
+ * Resolves an intercepting route to its canonical equivalent
+ * Example: /gallery/test/(..)photo/[id] -> /gallery/photo/[id]
+ */
+function resolveInterceptingRoute(route: string): string {
+  const segments = route.split('/').filter(Boolean)
+  const resolved: string[] = []
+
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i]
+
+    if (segment.startsWith('(.)')) {
+      // Same level intercept - replace with the intercepted route
+      resolved.push(segment.slice(3))
+    } else if (segment.startsWith('(..)')) {
+      // Parent level intercept - go up one level and add intercepted route
+      resolved.pop() // Remove the current level
+      resolved.push(segment.slice(4))
+    } else if (segment.startsWith('(...)')) {
+      // Root level intercept - clear path and add intercepted route
+      resolved.length = 0
+      resolved.push(segment.slice(5))
+    } else {
+      resolved.push(segment)
+    }
+  }
+
+  return '/' + resolved.join('/')
+}
+
+/**
  * Creates a route types manifest from processed route data
  * (used for both build and dev)
  */
@@ -128,6 +171,8 @@ export async function createRouteTypesManifest({
   dir,
   pageRoutes,
   appRoutes,
+  appRouteHandlers,
+  pageApiRoutes,
   layoutRoutes,
   slots,
   redirects,
@@ -136,6 +181,8 @@ export async function createRouteTypesManifest({
   dir: string
   pageRoutes: Array<{ route: string; filePath: string }>
   appRoutes: Array<{ route: string; filePath: string }>
+  appRouteHandlers: Array<{ route: string; filePath: string }>
+  pageApiRoutes: Array<{ route: string; filePath: string }>
   layoutRoutes: Array<{ route: string; filePath: string }>
   slots: Array<{ name: string; parent: string }>
   redirects?: NextConfigComplete['redirects']
@@ -145,8 +192,34 @@ export async function createRouteTypesManifest({
     appRoutes: {},
     pageRoutes: {},
     layoutRoutes: {},
+    appRouteHandlerRoutes: {},
     redirectRoutes: {},
     rewriteRoutes: {},
+    appRouteHandlers: new Set(appRouteHandlers.map(({ filePath }) => filePath)),
+    pageApiRoutes: new Set(pageApiRoutes.map(({ filePath }) => filePath)),
+    appPagePaths: new Set(appRoutes.map(({ filePath }) => filePath)),
+    pagesRouterPagePaths: new Set(pageRoutes.map(({ filePath }) => filePath)),
+    layoutPaths: new Set(layoutRoutes.map(({ filePath }) => filePath)),
+    filePathToRoute: new Map([
+      ...appRoutes.map(
+        ({ route, filePath }) =>
+          [filePath, resolveInterceptingRoute(route)] as [string, string]
+      ),
+      ...layoutRoutes.map(
+        ({ route, filePath }) =>
+          [filePath, resolveInterceptingRoute(route)] as [string, string]
+      ),
+      ...appRouteHandlers.map(
+        ({ route, filePath }) =>
+          [filePath, resolveInterceptingRoute(route)] as [string, string]
+      ),
+      ...pageRoutes.map(
+        ({ route, filePath }) => [filePath, route] as [string, string]
+      ),
+      ...pageApiRoutes.map(
+        ({ route, filePath }) => [filePath, route] as [string, string]
+      ),
+    ]),
   }
 
   // Process page routes
@@ -180,6 +253,16 @@ export async function createRouteTypesManifest({
     if (!isCanonicalRoute(route)) continue
 
     manifest.appRoutes[route] = {
+      path: path.relative(dir, filePath),
+      groups: extractRouteParams(route),
+    }
+  }
+
+  // Process app route handlers
+  for (const { route, filePath } of appRouteHandlers) {
+    if (!isCanonicalRoute(route)) continue
+
+    manifest.appRouteHandlerRoutes[route] = {
       path: path.relative(dir, filePath),
       groups: extractRouteParams(route),
     }
@@ -245,4 +328,17 @@ export async function writeRouteTypesManifest(
     const linkTypesPath = path.join(dirname, 'link.d.ts')
     await fs.promises.writeFile(linkTypesPath, generateLinkTypesFile(manifest))
   }
+}
+
+export async function writeValidatorFile(
+  manifest: RouteTypesManifest,
+  filePath: string
+) {
+  const dirname = path.dirname(filePath)
+
+  if (!fs.existsSync(dirname)) {
+    await fs.promises.mkdir(dirname, { recursive: true })
+  }
+
+  await fs.promises.writeFile(filePath, generateValidatorFile(manifest))
 }

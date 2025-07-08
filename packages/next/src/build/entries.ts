@@ -76,7 +76,7 @@ import type { MappedPages } from './build-context'
 import { PAGE_TYPES } from '../lib/page-types'
 import { isAppPageRoute } from '../lib/is-app-page-route'
 import { recursiveReadDir } from '../lib/recursive-readdir'
-import { createValidFileMatcher } from '../server/lib/find-page-file'
+import type { createValidFileMatcher } from '../server/lib/find-page-file'
 import { isReservedPage } from './utils'
 import { isParallelRouteSegment } from '../shared/lib/segment'
 import { ensureLeadingSlash } from '../shared/lib/page-path/ensure-leading-slash'
@@ -84,19 +84,17 @@ import { ensureLeadingSlash } from '../shared/lib/page-path/ensure-leading-slash
 /**
  * Collect app pages and layouts from the app directory
  * @param appDir - The app directory path
- * @param pageExtensions - The configured page extensions
+ * @param validFileMatcher - File matcher object
  * @param options - Optional configuration
  * @returns Object containing appPaths and layoutPaths arrays
  */
 export async function collectAppFiles(
   appDir: string,
-  pageExtensions: PageExtensions
+  validFileMatcher: ReturnType<typeof createValidFileMatcher>
 ): Promise<{
   appPaths: string[]
   layoutPaths: string[]
 }> {
-  const validFileMatcher = createValidFileMatcher(pageExtensions, appDir)
-
   // Collect both app pages and layouts in a single directory traversal
   const allAppFiles = await recursiveReadDir(appDir, {
     pathnameFilter: (absolutePath) =>
@@ -127,14 +125,10 @@ export async function collectAppFiles(
  */
 export async function collectPagesFiles(
   pagesDir: string,
-  pageExtensions: PageExtensions
+  validFileMatcher: ReturnType<typeof createValidFileMatcher>
 ): Promise<string[]> {
   return recursiveReadDir(pagesDir, {
-    pathnameFilter: (absolutePath) => {
-      const relativePath = absolutePath.replace(pagesDir + '/', '')
-      return pageExtensions.some((ext) => relativePath.endsWith(`.${ext}`))
-    },
-    ignorePartFilter: (part) => part.startsWith('_'),
+    pathnameFilter: validFileMatcher.isPageFile,
   })
 }
 
@@ -251,22 +245,34 @@ export function extractSlotsFromAppRoutes(mappedAppPages: {
  */
 export function processAppRoutes(
   mappedAppPages: { [page: string]: string },
+  validFileMatcher: ReturnType<typeof createValidFileMatcher>,
   baseDir: string
-): RouteInfo[] {
+): {
+  appRoutes: RouteInfo[]
+  appRouteHandlers: RouteInfo[]
+} {
   const appRoutes: RouteInfo[] = []
+  const appRouteHandlers: RouteInfo[] = []
 
   for (const [route, filePath] of Object.entries(mappedAppPages)) {
     if (route === '/_not-found/page') continue
 
     const relativeFilePath = createRelativeFilePath(baseDir, filePath, 'app')
 
-    appRoutes.push({
-      route: normalizeAppPath(normalizePathSep(route)),
-      filePath: relativeFilePath,
-    })
+    if (validFileMatcher.isAppRouterRoute(filePath)) {
+      appRouteHandlers.push({
+        route: normalizeAppPath(normalizePathSep(route)),
+        filePath: relativeFilePath,
+      })
+    } else {
+      appRoutes.push({
+        route: normalizeAppPath(normalizePathSep(route)),
+        filePath: relativeFilePath,
+      })
+    }
   }
 
-  return appRoutes
+  return { appRoutes, appRouteHandlers }
 }
 
 /**

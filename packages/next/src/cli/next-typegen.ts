@@ -27,6 +27,7 @@ import {
   createRouteTypesManifest,
   writeRouteTypesManifest,
 } from '../server/lib/router-utils/route-types-utils'
+import { createValidFileMatcher } from '../server/lib/find-page-file'
 
 export type NextTypegenOptions = {
   dir?: string
@@ -65,10 +66,11 @@ const nextTypegen = async (
 
   let pageRoutes: RouteInfo[] = []
   let appRoutes: RouteInfo[] = []
+  let appRouteHandlers: RouteInfo[] = []
   let layoutRoutes: RouteInfo[] = []
   let slots: SlotInfo[] = []
 
-  let _pageApiRoutes: RouteInfo[] = []
+  let pageApiRoutes: RouteInfo[] = []
 
   let mappedPages: { [page: string]: string } = {}
   let mappedAppPages: { [page: string]: string } = {}
@@ -85,19 +87,21 @@ const nextTypegen = async (
       appDir,
     })
 
+  const validFileMatcher = createValidFileMatcher(
+    nextConfig.pageExtensions,
+    appDir
+  )
+
   // Build pages routes
   if (pagesDir) {
-    const pagePaths = await collectPagesFiles(
-      pagesDir,
-      nextConfig.pageExtensions
-    )
+    const pagePaths = await collectPagesFiles(pagesDir, validFileMatcher)
 
     mappedPages = await createMapping(pagePaths, PAGE_TYPES.PAGES)
 
     // Process pages routes
     const processedPages = processPageRoutes(mappedPages, baseDir)
     pageRoutes = processedPages.pageRoutes
-    _pageApiRoutes = processedPages.pageApiRoutes
+    pageApiRoutes = processedPages.pageApiRoutes
   }
 
   // Build app routes
@@ -105,7 +109,7 @@ const nextTypegen = async (
     // Collect both app pages and layouts in a single directory traversal
     const { appPaths, layoutPaths } = await collectAppFiles(
       appDir,
-      nextConfig.pageExtensions
+      validFileMatcher
     )
 
     mappedAppPages = await createMapping(appPaths, PAGE_TYPES.APP)
@@ -113,7 +117,9 @@ const nextTypegen = async (
 
     // Process app routes and extract slots
     slots = extractSlotsFromAppRoutes(mappedAppPages)
-    appRoutes = processAppRoutes(mappedAppPages, baseDir)
+    const result = processAppRoutes(mappedAppPages, validFileMatcher, baseDir)
+    appRoutes = result.appRoutes
+    appRouteHandlers = result.appRouteHandlers
 
     // Process layout routes
     layoutRoutes = processLayoutRoutes(mappedAppLayouts, baseDir)
@@ -123,6 +129,8 @@ const nextTypegen = async (
     dir: baseDir,
     pageRoutes,
     appRoutes,
+    appRouteHandlers,
+    pageApiRoutes,
     layoutRoutes,
     slots,
     redirects: nextConfig.redirects,

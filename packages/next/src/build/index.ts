@@ -117,6 +117,7 @@ import {
   extractSlotsFromAppRoutes,
   type RouteInfo,
   type SlotInfo,
+  collectPagesFiles,
 } from './entries'
 import { PAGE_TYPES } from '../lib/page-types'
 import { generateBuildId } from './generate-build-id'
@@ -145,7 +146,6 @@ import isError from '../lib/is-error'
 import type { NextError } from '../lib/is-error'
 import { isEdgeRuntime } from '../lib/is-edge-runtime'
 import { recursiveCopy } from '../lib/recursive-copy'
-import { recursiveReadDir } from '../lib/recursive-readdir'
 import { lockfilePatchPromise, teardownTraceSubscriber } from './swc'
 import { getNamedRouteRegex } from '../shared/lib/router/utils/route-regex'
 import { getFilesInDir } from '../lib/get-files-in-dir'
@@ -218,9 +218,11 @@ import {
   sortPages,
   sortSortableRouteObjects,
 } from '../shared/lib/router/utils/sortable-routes'
+import { mkdir } from 'fs/promises'
 import {
   createRouteTypesManifest,
   writeRouteTypesManifest,
+  writeValidatorFile,
 } from '../server/lib/router-utils/route-types-utils'
 
 type Fallback = null | boolean | string
@@ -1153,11 +1155,9 @@ export default async function build(
       let pagesPaths = Boolean(process.env.NEXT_PRIVATE_PAGE_PATHS)
         ? providedPagePaths
         : !appDirOnly && pagesDir
-          ? await nextBuildSpan.traceChild('collect-pages').traceAsyncFn(() =>
-              recursiveReadDir(pagesDir, {
-                pathnameFilter: validFileMatcher.isPageFile,
-              })
-            )
+          ? await nextBuildSpan
+              .traceChild('collect-pages')
+              .traceAsyncFn(() => collectPagesFiles(pagesDir, validFileMatcher))
           : []
 
       const middlewareDetectionRegExp = new RegExp(
@@ -1223,13 +1223,14 @@ export default async function build(
         let layoutPaths: string[]
 
         if (Boolean(process.env.NEXT_PRIVATE_APP_PATHS)) {
+          // used for testing?
           appPaths = providedAppPaths
           layoutPaths = []
         } else {
           // Collect both app pages and layouts in a single directory traversal
           const result = await nextBuildSpan
             .traceChild('collect-app-files')
-            .traceAsyncFn(() => collectAppFiles(appDir, config.pageExtensions))
+            .traceAsyncFn(() => collectAppFiles(appDir, validFileMatcher))
 
           appPaths = result.appPaths
           layoutPaths = result.layoutPaths
@@ -1313,25 +1314,29 @@ export default async function build(
         .traceChild('generate-route-types')
         .traceAsyncFn(async () => {
           const routeTypesFilePath = path.join(distDir, 'types', 'routes.d.ts')
-          await fs.mkdir(path.dirname(routeTypesFilePath), { recursive: true })
+          const validatorFilePath = path.join(distDir, 'types', 'validator.ts')
+          await mkdir(path.dirname(routeTypesFilePath), { recursive: true })
 
-          let pageRoutes: RouteInfo[] = []
           let appRoutes: RouteInfo[] = []
+          let appRouteHandlers: RouteInfo[] = []
           let layoutRoutes: RouteInfo[] = []
           let slots: SlotInfo[] = []
 
-          // Build pages routes
-          const processedPages = processPageRoutes(mappedPages, dir)
-          // We combine both page routes and API routes
-          pageRoutes = [
-            ...processedPages.pageRoutes,
-            ...processedPages.pageApiRoutes,
-          ]
+          const { pageRoutes, pageApiRoutes } = processPageRoutes(
+            mappedPages,
+            dir
+          )
 
           // Build app routes
           if (appDir && mappedAppPages) {
             slots = extractSlotsFromAppRoutes(mappedAppPages)
-            appRoutes = processAppRoutes(mappedAppPages, dir)
+            const result = processAppRoutes(
+              mappedAppPages,
+              validFileMatcher,
+              dir
+            )
+            appRoutes = result.appRoutes
+            appRouteHandlers = result.appRouteHandlers
           }
 
           // Build app layouts
@@ -1343,6 +1348,8 @@ export default async function build(
             dir,
             pageRoutes,
             appRoutes,
+            appRouteHandlers,
+            pageApiRoutes,
             layoutRoutes,
             slots,
             redirects: config.redirects,
@@ -1354,6 +1361,7 @@ export default async function build(
             routeTypesFilePath,
             config
           )
+          await writeValidatorFile(routeTypesManifest, validatorFilePath)
         })
 
       // Turbopack already handles conflicting app and page routes.
