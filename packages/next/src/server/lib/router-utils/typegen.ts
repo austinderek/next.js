@@ -142,22 +142,6 @@ export function generateValidatorFile(
   const { appPaths, pagePaths, layoutPaths } = routesManifest
   const basePrefix = '../..'
 
-  const generateImports = (paths: string[]) =>
-    paths
-      .sort()
-      .map((filePath) => {
-        const importPath = `${basePrefix}/${filePath.replace(/\.(tsx?|jsx?)$/, '')}`
-        return `  ${JSON.stringify(filePath)}: typeof import(${JSON.stringify(importPath)})`
-      })
-      .join(',\n')
-
-  const appPageImports = generateImports(Array.from(appPaths))
-  const pagesPageImports = generateImports(Array.from(pagePaths))
-  const allPageImports = [appPageImports, pagesPageImports]
-    .filter(Boolean)
-    .join(',\n')
-  const layoutImports = generateImports(Array.from(layoutPaths))
-
   const generateValidations = (
     paths: string[],
     type: 'PageConfig' | 'LayoutConfig'
@@ -165,10 +149,10 @@ export function generateValidatorFile(
     paths
       .sort()
       .map((filePath) => {
-        const importType = type === 'PageConfig' ? 'Pages' : 'Layouts'
+        const importPath = `${basePrefix}/${filePath.replace(/\.(tsx?|jsx?)$/, '')}`
         return `// Validate ${filePath}
 {
-  const handler = {} as ${importType}[${JSON.stringify(filePath)}]
+  const handler = {} as typeof import(${JSON.stringify(importPath)})
   handler satisfies ${type}
 }`
       })
@@ -217,14 +201,6 @@ type LayoutConfig = {
   runtime?: 'nodejs' | 'experimental-edge' | 'edge'
   maxDuration?: number
   experimental_ppr?: boolean
-}
-
-type Pages = {
-${allPageImports}
-}
-
-type Layouts = {
-${layoutImports}
 }
 
 ${pageValidations}
