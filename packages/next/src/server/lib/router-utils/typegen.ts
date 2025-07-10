@@ -139,12 +139,15 @@ function generateLayoutSlotMap(routesManifest: RouteTypesManifest): string {
 export function generateValidatorFile(
   routesManifest: RouteTypesManifest
 ): string {
-  const { appPaths, pagePaths, layoutPaths } = routesManifest
   const basePrefix = '../..'
 
   const generateValidations = (
     paths: string[],
-    type: 'PageConfig' | 'LayoutConfig'
+    type:
+      | 'PageConfig'
+      | 'LayoutConfig'
+      | 'RouteHandlerConfig'
+      | 'ApiRouteConfig'
   ) =>
     paths
       .sort()
@@ -158,12 +161,25 @@ export function generateValidatorFile(
       })
       .join('\n\n')
 
-  const pageValidations = generateValidations(
-    [...Array.from(appPaths), ...Array.from(pagePaths)],
+  // Generate validations for different route types
+  const appPageValidations = generateValidations(
+    Array.from(routesManifest.appPagePaths),
     'PageConfig'
   )
+  const appRouteHandlerValidations = generateValidations(
+    Array.from(routesManifest.appRouteHandlerPaths),
+    'RouteHandlerConfig'
+  )
+  const pagesRouterPageValidations = generateValidations(
+    Array.from(routesManifest.pagesRouterPagePaths),
+    'PageConfig'
+  )
+  const pagesApiRouteValidations = generateValidations(
+    Array.from(routesManifest.pagesApiRoutePaths),
+    'ApiRouteConfig'
+  )
   const layoutValidations = generateValidations(
-    Array.from(layoutPaths),
+    Array.from(routesManifest.layoutPaths),
     'LayoutConfig'
   )
 
@@ -177,6 +193,8 @@ type PageConfig = {
   generateStaticParams?: () => Promise<any[]> | any[]
   generateMetadata?: (props: any, parent: any) => Promise<any> | any
   generateViewport?: (props: any, parent: any) => Promise<any> | any
+  metadata?: any
+  viewport?: any
   revalidate?: number | false
   dynamic?: 'auto' | 'force-dynamic' | 'error' | 'force-static'
   dynamicParams?: boolean
@@ -193,6 +211,8 @@ type LayoutConfig = {
   generateStaticParams?: () => Promise<any[]> | any[]
   generateMetadata?: (props: any, parent: any) => Promise<any> | any
   generateViewport?: (props: any, parent: any) => Promise<any> | any
+  metadata?: any
+  viewport?: any
   revalidate?: number | false
   dynamic?: 'auto' | 'force-dynamic' | 'error' | 'force-static'
   dynamicParams?: boolean
@@ -203,7 +223,42 @@ type LayoutConfig = {
   experimental_ppr?: boolean
 }
 
-${pageValidations}
+type RouteHandlerConfig = {
+  GET?: (request: Request, context: { params: Promise<any> }) => Promise<Response> | Response
+  POST?: (request: Request, context: { params: Promise<any> }) => Promise<Response> | Response
+  PUT?: (request: Request, context: { params: Promise<any> }) => Promise<Response> | Response
+  PATCH?: (request: Request, context: { params: Promise<any> }) => Promise<Response> | Response
+  DELETE?: (request: Request, context: { params: Promise<any> }) => Promise<Response> | Response
+  HEAD?: (request: Request, context: { params: Promise<any> }) => Promise<Response> | Response
+  OPTIONS?: (request: Request, context: { params: Promise<any> }) => Promise<Response> | Response
+  config?: {}
+  revalidate?: number | false
+  dynamic?: 'auto' | 'force-dynamic' | 'error' | 'force-static'
+  dynamicParams?: boolean
+  fetchCache?: 'auto' | 'force-no-store' | 'only-no-store' | 'default-no-store' | 'default-cache' | 'only-cache' | 'force-cache'
+  preferredRegion?: 'auto' | 'global' | 'home' | string | string[]
+  runtime?: 'nodejs' | 'experimental-edge' | 'edge'
+  maxDuration?: number
+}
+
+type ApiRouteConfig = {
+  default: (req: any, res: any) => Promise<void> | void
+  config?: {
+    api?: {
+      bodyParser?: boolean | { sizeLimit?: string }
+      responseLimit?: string | number
+      externalResolver?: boolean
+    }
+  }
+}
+
+${appPageValidations}
+
+${appRouteHandlerValidations}
+
+${pagesRouterPageValidations}
+
+${pagesApiRouteValidations}
 
 ${layoutValidations}
 `

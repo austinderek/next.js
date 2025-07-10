@@ -17,9 +17,19 @@ export interface RouteTypesManifest {
   redirectRoutes: Record<string, RouteInfo>
   /** Map of rewrite source => RouteInfo */
   rewriteRoutes: Record<string, RouteInfo>
+  // New: Separate route types for validation
+  appPageRoutes: Record<string, RouteInfo>
+  appRouteHandlers: Record<string, RouteInfo>
+  pagesRouterPages: Record<string, RouteInfo>
+  pagesApiRoutes: Record<string, RouteInfo>
   appPaths: Set<string>
   pagePaths: Set<string>
   layoutPaths: Set<string>
+  // New: Separate paths for validation
+  appPagePaths: Set<string>
+  appRouteHandlerPaths: Set<string>
+  pagesRouterPagePaths: Set<string>
+  pagesApiRoutePaths: Set<string>
 }
 
 // Convert a custom-route source string (`/blog/:slug`, `/docs/:path*`, ...)
@@ -142,29 +152,65 @@ export function createUnifiedRouteTypesManifest({
   appPaths: Set<string>
   pagePaths: Set<string>
   layoutPaths: Set<string>
-  
 }): RouteTypesManifest {
   const manifest: RouteTypesManifest = {
     appRoutes: {},
     pageRoutes: {},
     layoutRoutes: {},
+<<<<<<< HEAD
     redirectRoutes: {},
     rewriteRoutes: {},
+=======
+    // Initialize new route type categories
+    appPageRoutes: {},
+    appRouteHandlers: {},
+    pagesRouterPages: {},
+    pagesApiRoutes: {},
+>>>>>>> 34a6e55457 (feat: validation for api routes + route handlers)
     appPaths,
     pagePaths,
     layoutPaths,
+    // Initialize new path categories
+    appPagePaths: new Set<string>(),
+    appRouteHandlerPaths: new Set<string>(),
+    pagesRouterPagePaths: new Set<string>(),
+    pagesApiRoutePaths: new Set<string>(),
   }
 
-  // Process page routes
+  // Process page routes (Pages Router)
   for (const { route, filePath } of pageRoutes) {
     if (shouldSkipRoute(filePath)) continue
-    manifest.pageRoutes[route] = createRouteInfo(route, filePath, dir)
+
+    const routeInfo = createRouteInfo(route, filePath, dir)
+    manifest.pageRoutes[route] = routeInfo
+
+    // Categorize by type
+    if (route.startsWith('/api/')) {
+      manifest.pagesApiRoutes[route] = routeInfo
+      manifest.pagesApiRoutePaths.add(routeInfo.path)
+    } else {
+      manifest.pagesRouterPages[route] = routeInfo
+      manifest.pagesRouterPagePaths.add(routeInfo.path)
+    }
   }
 
-  // Process app routes
+  // Process app routes (App Router)
   for (const { route, filePath } of appRoutes) {
     if (shouldSkipRoute(filePath)) continue
-    manifest.appRoutes[route] = createRouteInfo(route, filePath, dir)
+
+    const routeInfo = createRouteInfo(route, filePath, dir)
+    manifest.appRoutes[route] = routeInfo
+
+    // Categorize by file type - check if it's route.ts/tsx or page.ts/tsx
+    const isRouteHandler = /[/\\]route\.[^.]+$/.test(filePath)
+
+    if (isRouteHandler) {
+      manifest.appRouteHandlers[route] = routeInfo
+      manifest.appRouteHandlerPaths.add(routeInfo.path)
+    } else {
+      manifest.appPageRoutes[route] = routeInfo
+      manifest.appPagePaths.add(routeInfo.path)
+    }
   }
 
   // Process layout routes
