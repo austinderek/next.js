@@ -30,7 +30,6 @@ use crate::{
     DiskFileSystemInner, format_absolute_fs_path,
     invalidation::{WatchChange, WatchStart},
     invalidator_map::WriteContent,
-    path_to_key,
 };
 
 static WATCH_RECURSIVE_MODE: LazyLock<RecursiveMode> = LazyLock::new(|| {
@@ -279,7 +278,8 @@ impl DiskWatcher {
                     let _span = span.clone().entered();
                     let reason = WatchStart {
                         name: fs_inner.name.clone(),
-                        path: path.into(),
+                        // this path is just used for display purposes
+                        path: RcStr::from(path.to_string_lossy()),
                     };
                     invalidators
                         .into_par_iter()
@@ -374,7 +374,8 @@ impl DiskWatcher {
 
                             if report_invalidation_reason {
                                 inner.invalidate_with_reason(|path| InvalidateRescan {
-                                    path: RcStr::from(path),
+                                    // this path is just used for display purposes
+                                    path: RcStr::from(path.to_string_lossy()),
                                 });
                             } else {
                                 inner.invalidate();
@@ -601,12 +602,11 @@ fn invalidate(
 fn invalidate_path(
     inner: &DiskFileSystemInner,
     report_invalidation_reason: bool,
-    invalidator_map: &mut FxHashMap<String, FxHashMap<Invalidator, Option<WriteContent>>>,
+    invalidator_map: &mut FxHashMap<PathBuf, FxHashMap<Invalidator, Option<WriteContent>>>,
     paths: impl Iterator<Item = PathBuf>,
 ) {
     for path in paths {
-        let key = path_to_key(&path);
-        if let Some(invalidators) = invalidator_map.remove(&key) {
+        if let Some(invalidators) = invalidator_map.remove(&path) {
             invalidators
                 .into_iter()
                 .for_each(|(i, _)| invalidate(inner, report_invalidation_reason, &path, i));
@@ -617,12 +617,11 @@ fn invalidate_path(
 fn invalidate_path_and_children_execute(
     inner: &DiskFileSystemInner,
     report_invalidation_reason: bool,
-    invalidator_map: &mut FxHashMap<String, FxHashMap<Invalidator, Option<WriteContent>>>,
+    invalidator_map: &mut FxHashMap<PathBuf, FxHashMap<Invalidator, Option<WriteContent>>>,
     paths: impl Iterator<Item = PathBuf>,
 ) {
     for path in paths {
-        let path_key = path_to_key(&path);
-        for (_, invalidators) in invalidator_map.extract_if(|key, _| key.starts_with(&path_key)) {
+        for (_, invalidators) in invalidator_map.extract_if(|key, _| key.starts_with(&path)) {
             invalidators
                 .into_iter()
                 .for_each(|(i, _)| invalidate(inner, report_invalidation_reason, &path, i));

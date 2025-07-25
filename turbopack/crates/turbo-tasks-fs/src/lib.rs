@@ -254,7 +254,7 @@ impl DiskFileSystemInner {
     fn register_read_invalidator(&self, path: &Path) -> Result<()> {
         let invalidator = turbo_tasks::get_invalidator();
         self.invalidator_map
-            .insert(path_to_key(path), invalidator, None);
+            .insert(path.to_owned(), invalidator, None);
         if let Some(non_recursive) = &self.watcher.non_recursive_state
             && let Some(dir) = path.parent()
         {
@@ -273,7 +273,7 @@ impl DiskFileSystemInner {
         write_content: WriteContent,
     ) -> Result<Vec<(Invalidator, Option<WriteContent>)>> {
         let mut invalidator_map = self.invalidator_map.lock().unwrap();
-        let invalidators = invalidator_map.entry(path_to_key(path)).or_default();
+        let invalidators = invalidator_map.entry(path.to_owned()).or_default();
         let old_invalidators = invalidators
             .extract_if(|i, old_write_content| {
                 i == &invalidator
@@ -298,7 +298,7 @@ impl DiskFileSystemInner {
     fn register_dir_invalidator(&self, path: &Path) -> Result<()> {
         let invalidator = turbo_tasks::get_invalidator();
         self.dir_invalidator_map
-            .insert(path_to_key(path), invalidator, None);
+            .insert(path.to_owned(), invalidator, None);
         if let Some(non_recursive) = &self.watcher.non_recursive_state {
             non_recursive.ensure_watching(&self.watcher, path, self.root_path())?;
         }
@@ -333,7 +333,7 @@ impl DiskFileSystemInner {
     /// Calls the given
     fn invalidate_with_reason<R: InvalidationReason + Clone>(
         &self,
-        reason: impl Fn(String) -> R + Sync,
+        reason: impl Fn(&Path) -> R + Sync,
     ) {
         let _span = tracing::info_span!("invalidate filesystem", name = &*self.root).entered();
         let span = tracing::Span::current();
@@ -345,7 +345,7 @@ impl DiskFileSystemInner {
             .chain(dir_invalidator_map.into_par_iter())
             .flat_map(|(path, invalidators)| {
                 let _span = span.clone().entered();
-                let reason_for_path = reason(path);
+                let reason_for_path = reason(&path);
                 invalidators
                     .into_par_iter()
                     .map(move |i| (reason_for_path.clone(), i))
@@ -449,7 +449,7 @@ impl DiskFileSystem {
 
     pub fn invalidate_with_reason<R: InvalidationReason + Clone>(
         &self,
-        reason: impl Fn(String) -> R + Sync,
+        reason: impl Fn(&Path) -> R + Sync,
     ) {
         self.inner.invalidate_with_reason(reason);
     }
@@ -502,10 +502,6 @@ fn format_absolute_fs_path(path: &Path, name: &str, root_path: &Path) -> Option<
     } else {
         None
     }
-}
-
-pub fn path_to_key(path: impl AsRef<Path>) -> String {
-    path.as_ref().to_string_lossy().to_string()
 }
 
 #[turbo_tasks::value_impl]
@@ -756,11 +752,12 @@ impl FileSystem for DiskFileSystem {
                 .await?;
             if compare == FileComparison::Equal {
                 if !old_invalidators.is_empty() {
-                    let key = path_to_key(&full_path);
                     for (invalidator, write_content) in old_invalidators {
-                        inner
-                            .invalidator_map
-                            .insert(key.clone(), invalidator, write_content);
+                        inner.invalidator_map.insert(
+                            full_path.clone().into_owned(),
+                            invalidator,
+                            write_content,
+                        );
                     }
                 }
                 return Ok(());
@@ -899,11 +896,12 @@ impl FileSystem for DiskFileSystem {
             };
             if is_equal {
                 if !old_invalidators.is_empty() {
-                    let key = path_to_key(&full_path);
                     for (invalidator, write_content) in old_invalidators {
-                        inner
-                            .invalidator_map
-                            .insert(key.clone(), invalidator, write_content);
+                        inner.invalidator_map.insert(
+                            full_path.clone().into_owned(),
+                            invalidator,
+                            write_content,
+                        );
                     }
                 }
                 return Ok(());
