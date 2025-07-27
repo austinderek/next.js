@@ -9,7 +9,7 @@ export function toFileName(str: string) {
     .replace(/^-+/, '') // Remove leading hyphen
     .replace(/-+$/, '') // remove trailing hyphen
 
-    return sanitized || 'untitled'
+  return sanitized || 'untitled'
 }
 
 export function init(plop: NodePlopAPI): void {
