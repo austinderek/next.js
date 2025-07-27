@@ -58,6 +58,8 @@ export function sourceMapIgnoreListsEverything(
 /**
  * Finds the sourcemap payload applicable to a given frame.
  * Equal to the input unless an Index Source Map is used.
+ * @param line0 - The line number of the frame, 0-based.
+ * @param column0 - The column number of the frame, 0-based.
  */
 export function findApplicableSourceMapPayload(
   line0: number,
@@ -120,15 +122,7 @@ export function filterStackFrameDEV(
     // built-in Components in parent stacks don't have source location.
     // Filter out frames that show up in Promises to get good names in React's
     // Server Request track until we come up with a better heuristic.
-    return (
-      functionName !== 'new Promise' &&
-      functionName !== 'Promise.then' &&
-      functionName !== 'Promise.catch' &&
-      functionName !== 'Promise.finally' &&
-      functionName !== 'Function.withResolvers' &&
-      functionName !== 'Function.all' &&
-      functionName !== 'Function.allSettled'
-    )
+    return functionName !== 'new Promise'
   }
   if (sourceURL.startsWith('node:') || sourceURL.includes('node_modules')) {
     return false
@@ -171,9 +165,9 @@ export function filterStackFrameDEV(
 }
 
 export function devirtualizeReactServerURL(sourceURL: string): string {
-  if (sourceURL.startsWith('rsc://React/')) {
-    // rsc://React/Server/file://<filename>?42 => file://<filename>
-    const envIdx = sourceURL.indexOf('/', 'rsc://React/'.length)
+  if (sourceURL.startsWith('about://React/')) {
+    // about://React/Server/file://<filename>?42 => file://<filename>
+    const envIdx = sourceURL.indexOf('/', 'about://React/'.length)
     const suffixIdx = sourceURL.lastIndexOf('?')
     if (envIdx > -1 && suffixIdx > -1) {
       return decodeURI(sourceURL.slice(envIdx + 1, suffixIdx))
