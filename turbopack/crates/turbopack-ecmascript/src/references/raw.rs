@@ -1,22 +1,23 @@
 use anyhow::Result;
-use turbo_tasks::{RcStr, ValueToString, Vc};
+use turbo_rcstr::RcStr;
+use turbo_tasks::{ResolvedVc, ValueToString, Vc};
 use turbopack_core::{
     reference::ModuleReference,
-    resolve::{pattern::Pattern, resolve_raw, ModuleResolveResult},
+    resolve::{ModuleResolveResult, pattern::Pattern, resolve_raw},
     source::Source,
 };
 
 #[turbo_tasks::value]
 #[derive(Hash, Debug)]
 pub struct FileSourceReference {
-    pub source: Vc<Box<dyn Source>>,
-    pub path: Vc<Pattern>,
+    pub source: ResolvedVc<Box<dyn Source>>,
+    pub path: ResolvedVc<Pattern>,
 }
 
 #[turbo_tasks::value_impl]
 impl FileSourceReference {
     #[turbo_tasks::function]
-    pub fn new(source: Vc<Box<dyn Source>>, path: Vc<Pattern>) -> Vc<Self> {
+    pub fn new(source: ResolvedVc<Box<dyn Source>>, path: ResolvedVc<Pattern>) -> Vc<Self> {
         Self::cell(FileSourceReference { source, path })
     }
 }
@@ -24,10 +25,10 @@ impl FileSourceReference {
 #[turbo_tasks::value_impl]
 impl ModuleReference for FileSourceReference {
     #[turbo_tasks::function]
-    fn resolve_reference(&self) -> Vc<ModuleResolveResult> {
-        let context_dir = self.source.ident().path().parent();
+    async fn resolve_reference(&self) -> Result<Vc<ModuleResolveResult>> {
+        let context_dir = self.source.ident().path().await?.parent();
 
-        resolve_raw(context_dir, self.path, false).as_raw_module_result()
+        Ok(resolve_raw(context_dir, *self.path, false).as_raw_module_result())
     }
 }
 

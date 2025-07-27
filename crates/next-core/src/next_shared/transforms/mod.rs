@@ -1,3 +1,4 @@
+pub(crate) mod debug_fn_name;
 pub(crate) mod emotion;
 pub(crate) mod modularize_imports;
 pub(crate) mod next_amp_attributes;
@@ -6,6 +7,7 @@ pub(crate) mod next_disallow_re_export_all_in_page;
 pub(crate) mod next_dynamic;
 pub(crate) mod next_edge_node_api_assert;
 pub(crate) mod next_font;
+pub(crate) mod next_lint;
 pub(crate) mod next_middleware_dynamic_assert;
 pub(crate) mod next_optimize_server_react;
 pub(crate) mod next_page_config;
@@ -14,6 +16,7 @@ pub(crate) mod next_pure;
 pub(crate) mod next_react_server_components;
 pub(crate) mod next_shake_exports;
 pub(crate) mod next_strip_page_exports;
+pub(crate) mod next_track_dynamic_imports;
 pub(crate) mod react_remove_properties;
 pub(crate) mod relay;
 pub(crate) mod remove_console;
@@ -22,21 +25,24 @@ pub(crate) mod styled_components;
 pub(crate) mod styled_jsx;
 pub(crate) mod swc_ecma_transform_plugins;
 
-pub use modularize_imports::{get_next_modularize_imports_rule, ModularizeImportPackageConfig};
+use anyhow::Result;
+pub use modularize_imports::{ModularizeImportPackageConfig, get_next_modularize_imports_rule};
 pub use next_dynamic::get_next_dynamic_transform_rule;
 pub use next_font::get_next_font_transform_rule;
+pub use next_lint::get_next_lint_transform_rule;
 pub use next_strip_page_exports::get_next_pages_transforms_rule;
+pub use next_track_dynamic_imports::get_next_track_dynamic_imports_transform_rule;
 pub use server_actions::get_server_actions_transform_rule;
-use turbo_tasks::{ReadRef, Value, Vc};
+use turbo_tasks::ResolvedVc;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{ModuleRule, ModuleRuleEffect, ModuleType, RuleCondition};
 use turbopack_core::reference_type::{ReferenceType, UrlReferenceSubType};
 use turbopack_ecmascript::{CustomTransformer, EcmascriptInputTransform};
 
-use crate::next_image::{module::BlurPlaceholderMode, StructuredImageModuleType};
+use crate::next_image::{StructuredImageModuleType, module::BlurPlaceholderMode};
 
-pub fn get_next_image_rule() -> ModuleRule {
-    ModuleRule::new(
+pub async fn get_next_image_rule() -> Result<ModuleRule> {
+    Ok(ModuleRule::new(
         RuleCondition::All(vec![
             // avoid urlAssetReference to be affected by this rule, since urlAssetReference
             // requires raw module to have its paths in the export
@@ -60,11 +66,13 @@ pub fn get_next_image_rule() -> ModuleRule {
             ]),
         ]),
         vec![ModuleRuleEffect::ModuleType(ModuleType::Custom(
-            Vc::upcast(StructuredImageModuleType::new(Value::new(
-                BlurPlaceholderMode::DataUrl,
-            ))),
+            ResolvedVc::upcast(
+                StructuredImageModuleType::new(BlurPlaceholderMode::DataUrl)
+                    .to_resolved()
+                    .await?,
+            ),
         ))],
-    )
+    ))
 }
 
 fn match_js_extension(enable_mdx_rs: bool) -> Vec<RuleCondition> {
@@ -80,6 +88,8 @@ fn match_js_extension(enable_mdx_rs: bool) -> Vec<RuleCondition> {
         RuleCondition::ResourcePathEndsWith(".tsx".to_string()),
         RuleCondition::ResourcePathEndsWith(".mjs".to_string()),
         RuleCondition::ResourcePathEndsWith(".cjs".to_string()),
+        RuleCondition::ContentTypeStartsWith("application/javascript".to_string()),
+        RuleCondition::ContentTypeStartsWith("text/javascript".to_string()),
     ];
 
     if enable_mdx_rs {
@@ -87,6 +97,7 @@ fn match_js_extension(enable_mdx_rs: bool) -> Vec<RuleCondition> {
             vec![
                 RuleCondition::ResourcePathEndsWith(".md".to_string()),
                 RuleCondition::ResourcePathEndsWith(".mdx".to_string()),
+                RuleCondition::ContentTypeStartsWith("text/markdown".to_string()),
             ]
             .as_mut(),
         );
@@ -110,7 +121,7 @@ pub(crate) fn module_rule_match_js_no_url(enable_mdx_rs: bool) -> RuleCondition 
 
 pub(crate) fn module_rule_match_pages_page_file(
     enable_mdx_rs: bool,
-    pages_directory: ReadRef<FileSystemPath>,
+    pages_directory: FileSystemPath,
 ) -> RuleCondition {
     let conditions = match_js_extension(enable_mdx_rs);
 
@@ -130,11 +141,17 @@ pub(crate) fn get_ecma_transform_rule(
     enable_mdx_rs: bool,
     prepend: bool,
 ) -> ModuleRule {
-    let transformer = EcmascriptInputTransform::Plugin(Vc::cell(transformer as _));
+    let transformer = EcmascriptInputTransform::Plugin(ResolvedVc::cell(transformer as _));
     let (prepend, append) = if prepend {
-        (Vc::cell(vec![transformer]), Vc::cell(vec![]))
+        (
+            ResolvedVc::cell(vec![transformer]),
+            ResolvedVc::cell(vec![]),
+        )
     } else {
-        (Vc::cell(vec![]), Vc::cell(vec![transformer]))
+        (
+            ResolvedVc::cell(vec![]),
+            ResolvedVc::cell(vec![transformer]),
+        )
     };
 
     ModuleRule::new(

@@ -3,7 +3,7 @@ use swc_core::{
     common::{errors::HANDLER, Spanned, DUMMY_SP},
     ecma::{
         ast::*,
-        atoms::JsWord,
+        atoms::Atom,
         visit::{noop_visit_type, Visit},
     },
 };
@@ -13,7 +13,7 @@ pub struct FontImportsGenerator<'a> {
     pub relative_path: &'a str,
 }
 
-impl<'a> FontImportsGenerator<'a> {
+impl FontImportsGenerator<'_> {
     fn check_call_expr(
         &mut self,
         call_expr: &CallExpr,
@@ -66,7 +66,7 @@ impl<'a> FontImportsGenerator<'a> {
 
                         return Some(ImportDecl {
                             src: Box::new(Str {
-                                value: JsWord::from(format!(
+                                value: Atom::from(format!(
                                     "{}/target.css?{}",
                                     font_function.loader, query_json
                                 )),
@@ -145,21 +145,21 @@ impl<'a> FontImportsGenerator<'a> {
     }
 }
 
-impl<'a> Visit for FontImportsGenerator<'a> {
+impl Visit for FontImportsGenerator<'_> {
     noop_visit_type!();
 
     fn visit_module_item(&mut self, item: &ModuleItem) {
         match item {
             ModuleItem::Stmt(Stmt::Decl(Decl::Var(var_decl))) => {
                 if self.check_var_decl(var_decl).is_some() {
-                    self.state.removeable_module_items.insert(var_decl.span.lo);
+                    self.state.removable_module_items.insert(var_decl.span.lo);
                 }
             }
             ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export_decl)) => {
                 if let Decl::Var(var_decl) = &export_decl.decl {
                     if let Some(ident) = self.check_var_decl(var_decl) {
                         self.state
-                            .removeable_module_items
+                            .removable_module_items
                             .insert(export_decl.span.lo);
 
                         self.state.font_exports.push(ModuleItem::ModuleDecl(

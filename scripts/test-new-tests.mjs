@@ -17,7 +17,8 @@ async function main() {
     .boolean('flake-detection').argv
 
   let testMode = argv.mode
-  const attempts = argv['flake-detection'] ? 3 : 1
+  const isFlakeDetectionMode = argv['flake-detection']
+  const attempts = isFlakeDetectionMode ? 3 : 1
 
   if (testMode && !['dev', 'deploy', 'start'].includes(testMode)) {
     throw new Error(
@@ -78,13 +79,15 @@ async function main() {
   }
 
   const RUN_TESTS_ARGS = ['run-tests.js', '-c', '1', '--retries', '0']
-
+  const PR_NUMBER = process.env.GH_PR_NUMBER
   // Only override the test version for deploy tests, as they need to run against
   // the artifacts for the pull request. Otherwise, we don't need to specify this property,
   // as tests will run against the local version of Next.js
   const nextTestVersion =
     testMode === 'deploy'
-      ? `https://vercel-packages.vercel.app/next/commits/${commitSha}/next`
+      ? PR_NUMBER
+        ? `https://vercel-packages.vercel.app/next/prs/${PR_NUMBER}/next`
+        : `https://vercel-packages.vercel.app/next/commits/${commitSha}/next`
       : undefined
 
   if (nextTestVersion) {
@@ -126,7 +129,7 @@ async function main() {
   }
 
   for (let i = 0; i < attempts; i++) {
-    console.log(`\n\nRun ${i + 1}/${attempts} for ${testMode} tests`)
+    console.log(`\n\nRun ${i + 1}/${attempts} for ${testMode} tests (Webpack)`)
     await execa('node', [...RUN_TESTS_ARGS, ...currentTests], {
       ...EXECA_OPTS_STDIO,
       env: {
@@ -137,6 +140,24 @@ async function main() {
           testMode === 'deploy' ? 'test/deploy-tests-manifest.json' : undefined,
       },
     })
+  }
+
+  if (isFlakeDetectionMode && testMode !== 'deploy') {
+    for (let i = 0; i < attempts; i++) {
+      console.log(
+        `\n\nRun ${i + 1}/${attempts} for ${testMode} tests (Turbopack)`
+      )
+      await execa('node', [...RUN_TESTS_ARGS, ...currentTests], {
+        ...EXECA_OPTS_STDIO,
+        env: {
+          ...process.env,
+          NEXT_TEST_MODE: testMode,
+          NEXT_TEST_VERSION: nextTestVersion,
+          IS_TURBOPACK_TEST: '1',
+          TURBOPACK_BUILD: testMode === 'start' ? '1' : undefined,
+        },
+      })
+    }
   }
 }
 

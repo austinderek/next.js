@@ -10,7 +10,8 @@ import nodeUrl, { type UrlWithParsedQuery } from 'url'
 
 import { getImageBlurSvg } from '../shared/lib/image-blur-svg'
 import type { ImageConfigComplete } from '../shared/lib/image-config'
-import { hasMatch } from '../shared/lib/match-remote-pattern'
+import { hasLocalMatch } from '../shared/lib/match-local-pattern'
+import { hasRemoteMatch } from '../shared/lib/match-remote-pattern'
 import type { NextConfigComplete } from './config-shared'
 import { createRequestResponseMocks } from './lib/mock-request'
 import type { NextUrlWithParsedQuery } from './request-meta'
@@ -18,14 +19,16 @@ import {
   CachedRouteKind,
   type CachedImageValue,
   type IncrementalCacheEntry,
-  type IncrementalCacheItem,
   type IncrementalCacheValue,
+  type IncrementalResponseCacheEntry,
 } from './response-cache'
 import { sendEtagResponse } from './send-payload'
 import { getContentType, getExtension } from './serve-static'
 import * as Log from '../build/output/log'
 import isError from '../lib/is-error'
 import { parseUrl } from '../lib/url'
+import type { CacheControl } from './lib/cache-control'
+import { InvariantError } from '../shared/lib/invariant-error'
 
 type XCacheHeader = 'MISS' | 'HIT' | 'STALE'
 
@@ -36,29 +39,30 @@ const JPEG = 'image/jpeg'
 const GIF = 'image/gif'
 const SVG = 'image/svg+xml'
 const ICO = 'image/x-icon'
+const ICNS = 'image/x-icns'
 const TIFF = 'image/tiff'
 const BMP = 'image/bmp'
 const CACHE_VERSION = 4
 const ANIMATABLE_TYPES = [WEBP, PNG, GIF]
-const VECTOR_TYPES = [SVG]
+const BYPASS_TYPES = [SVG, ICO, ICNS, BMP]
 const BLUR_IMG_SIZE = 8 // should match `next-image-loader`
 const BLUR_QUALITY = 70 // should match `next-image-loader`
 
 let _sharp: typeof import('sharp')
 
-function getSharp() {
+export function getSharp(concurrency: number | null | undefined) {
   if (_sharp) {
     return _sharp
   }
   try {
-    _sharp = require('sharp')
+    _sharp = require('sharp') as typeof import('sharp')
     if (_sharp && _sharp.concurrency() > 1) {
       // Reducing concurrency should reduce the memory usage too.
       // We more aggressively reduce in dev but also reduce in prod.
       // https://sharp.pixelplumbing.com/api-utility#concurrency
       const divisor = process.env.NODE_ENV === 'development' ? 4 : 2
       _sharp.concurrency(
-        Math.floor(Math.max(_sharp.concurrency() / divisor, 1))
+        concurrency ?? Math.floor(Math.max(_sharp.concurrency() / divisor, 1))
       )
     }
   } catch (e: unknown) {
@@ -185,6 +189,9 @@ export function detectContentType(buffer: Buffer) {
   if ([0x00, 0x00, 0x01, 0x00].every((b, i) => buffer[i] === b)) {
     return ICO
   }
+  if ([0x69, 0x63, 0x6e, 0x73].every((b, i) => buffer[i] === b)) {
+    return ICNS
+  }
   if ([0x49, 0x49, 0x2a, 0x00].every((b, i) => buffer[i] === b)) {
     return TIFF
   }
@@ -213,6 +220,8 @@ export class ImageOptimizerCache {
       formats = ['image/webp'],
     } = imageData
     const remotePatterns = nextConfig.images?.remotePatterns || []
+    const localPatterns = nextConfig.images?.localPatterns
+    const qualities = nextConfig.images?.qualities
     const { url, w, q } = query
     let href: string
 
@@ -252,6 +261,9 @@ export class ImageOptimizerCache {
           errorMessage: '"url" parameter cannot be recursive',
         }
       }
+      if (!hasLocalMatch(localPatterns, url)) {
+        return { errorMessage: '"url" parameter is not allowed' }
+      }
     } else {
       let hrefParsed: URL
 
@@ -267,7 +279,7 @@ export class ImageOptimizerCache {
         return { errorMessage: '"url" parameter is invalid' }
       }
 
-      if (!hasMatch(domains, remotePatterns, hrefParsed)) {
+      if (!hasRemoteMatch(domains, remotePatterns, hrefParsed)) {
         return { errorMessage: '"url" parameter is not allowed' }
       }
     }
@@ -325,6 +337,18 @@ export class ImageOptimizerCache {
       }
     }
 
+    if (qualities) {
+      if (isDev) {
+        qualities.push(BLUR_QUALITY)
+      }
+
+      if (!qualities.includes(quality)) {
+        return {
+          errorMessage: `"q" parameter (quality) of ${q} is not allowed`,
+        }
+      }
+    }
+
     const mimeType = getSupportedMimeType(formats || [], req.headers['accept'])
 
     const isStatic = url.startsWith(
@@ -368,7 +392,7 @@ export class ImageOptimizerCache {
     this.nextConfig = nextConfig
   }
 
-  async get(cacheKey: string): Promise<IncrementalCacheEntry | null> {
+  async get(cacheKey: string): Promise<IncrementalResponseCacheEntry | null> {
     try {
       const cacheDir = join(this.cacheDir, cacheKey)
       const files = await promises.readdir(cacheDir)
@@ -392,9 +416,8 @@ export class ImageOptimizerCache {
           revalidateAfter:
             Math.max(maxAge, this.nextConfig.images.minimumCacheTTL) * 1000 +
             Date.now(),
-          curRevalidate: maxAge,
+          cacheControl: { revalidate: maxAge, expire: undefined },
           isStale: now > expireAt,
-          isFallback: false,
         }
       }
     } catch (_) {
@@ -406,18 +429,25 @@ export class ImageOptimizerCache {
     cacheKey: string,
     value: IncrementalCacheValue | null,
     {
-      revalidate,
+      cacheControl,
     }: {
-      revalidate?: number | false
+      cacheControl?: CacheControl
     }
   ) {
+    if (!this.nextConfig.experimental.isrFlushToDisk) {
+      return
+    }
+
     if (value?.kind !== CachedRouteKind.IMAGE) {
       throw new Error('invariant attempted to set non-image to image-cache')
     }
 
+    const revalidate = cacheControl?.revalidate
+
     if (typeof revalidate !== 'number') {
-      throw new Error('invariant revalidate must be a number for image-cache')
+      throw new InvariantError('revalidate must be a number for image-cache')
     }
+
     const expireAt =
       Math.max(revalidate, this.nextConfig.images.minimumCacheTTL) * 1000 +
       Date.now()
@@ -486,7 +516,7 @@ export function getMaxAge(str: string | null | undefined): number {
 }
 export function getPreviouslyCachedImageOrNull(
   upstreamImage: ImageUpstream,
-  previousCacheEntry: IncrementalCacheItem | undefined
+  previousCacheEntry: IncrementalCacheEntry | null | undefined
 ): CachedImageValue | null {
   if (
     previousCacheEntry?.value?.kind === 'IMAGE' &&
@@ -507,15 +537,30 @@ export async function optimizeImage({
   quality,
   width,
   height,
+  concurrency,
+  limitInputPixels,
+  sequentialRead,
+  timeoutInSeconds,
 }: {
   buffer: Buffer
   contentType: string
   quality: number
   width: number
   height?: number
+  concurrency?: number | null
+  limitInputPixels?: number
+  sequentialRead?: boolean | null
+  timeoutInSeconds?: number
 }): Promise<Buffer> {
-  const sharp = getSharp()
-  const transformer = sharp(buffer).timeout({ seconds: 7 }).rotate()
+  const sharp = getSharp(concurrency)
+  const transformer = sharp(buffer, {
+    limitInputPixels,
+    sequentialRead: sequentialRead ?? undefined,
+  })
+    .timeout({
+      seconds: timeoutInSeconds ?? 7,
+    })
+    .rotate()
 
   if (height) {
     transformer.resize(width, height)
@@ -526,9 +571,9 @@ export async function optimizeImage({
   }
 
   if (contentType === AVIF) {
-    const avifQuality = quality - 20
     transformer.avif({
-      quality: Math.max(avifQuality, 1),
+      quality: Math.max(quality - 20, 1),
+      effort: 3,
     })
   } else if (contentType === WEBP) {
     transformer.webp({ quality })
@@ -626,23 +671,37 @@ export async function imageOptimizer(
     'href' | 'width' | 'quality' | 'mimeType'
   >,
   nextConfig: {
+    experimental: Pick<
+      NextConfigComplete['experimental'],
+      | 'imgOptConcurrency'
+      | 'imgOptMaxInputPixels'
+      | 'imgOptSequentialRead'
+      | 'imgOptTimeoutInSeconds'
+    >
     images: Pick<
       NextConfigComplete['images'],
       'dangerouslyAllowSVG' | 'minimumCacheTTL'
     >
   },
-  isDev: boolean | undefined,
-  previousCacheEntry?: IncrementalCacheItem
+  opts: {
+    isDev?: boolean
+    silent?: boolean
+    previousCacheEntry?: IncrementalResponseCacheEntry | null
+  }
 ): Promise<{
   buffer: Buffer
   contentType: string
   maxAge: number
   etag: string
   upstreamEtag: string
+  error?: unknown
 }> {
   const { href, quality, width, mimeType } = paramsResult
   const { buffer: upstreamBuffer, etag: upstreamEtag } = imageUpstream
-  const maxAge = getMaxAge(imageUpstream.cacheControl)
+  const maxAge = Math.max(
+    nextConfig.images.minimumCacheTTL,
+    getMaxAge(imageUpstream.cacheControl)
+  )
 
   const upstreamType =
     detectContentType(upstreamBuffer) ||
@@ -653,18 +712,22 @@ export async function imageOptimizer(
       upstreamType.startsWith('image/svg') &&
       !nextConfig.images.dangerouslyAllowSVG
     ) {
-      Log.error(
-        `The requested resource "${href}" has type "${upstreamType}" but dangerouslyAllowSVG is disabled`
-      )
+      if (!opts.silent) {
+        Log.error(
+          `The requested resource "${href}" has type "${upstreamType}" but dangerouslyAllowSVG is disabled`
+        )
+      }
       throw new ImageError(
         400,
         '"url" parameter is valid but image type is not allowed'
       )
     }
     if (ANIMATABLE_TYPES.includes(upstreamType) && isAnimated(upstreamBuffer)) {
-      Log.warnOnce(
-        `The requested resource "${href}" is an animated image so it will not be optimized. Consider adding the "unoptimized" property to the <Image>.`
-      )
+      if (!opts.silent) {
+        Log.warnOnce(
+          `The requested resource "${href}" is an animated image so it will not be optimized. Consider adding the "unoptimized" property to the <Image>.`
+        )
+      }
       return {
         buffer: upstreamBuffer,
         contentType: upstreamType,
@@ -673,10 +736,7 @@ export async function imageOptimizer(
         upstreamEtag,
       }
     }
-    if (VECTOR_TYPES.includes(upstreamType)) {
-      // We don't warn here because we already know that "dangerouslyAllowSVG"
-      // was enabled above, therefore the user explicitly opted in.
-      // If we add more VECTOR_TYPES besides SVG, perhaps we could warn for those.
+    if (BYPASS_TYPES.includes(upstreamType)) {
       return {
         buffer: upstreamBuffer,
         contentType: upstreamType,
@@ -686,12 +746,14 @@ export async function imageOptimizer(
       }
     }
     if (!upstreamType.startsWith('image/') || upstreamType.includes(',')) {
-      Log.error(
-        "The requested resource isn't a valid image for",
-        href,
-        'received',
-        upstreamType
-      )
+      if (!opts.silent) {
+        Log.error(
+          "The requested resource isn't a valid image for",
+          href,
+          'received',
+          upstreamType
+        )
+      }
       throw new ImageError(400, "The requested resource isn't a valid image.")
     }
   }
@@ -712,13 +774,13 @@ export async function imageOptimizer(
   }
   const previouslyCachedImage = getPreviouslyCachedImageOrNull(
     imageUpstream,
-    previousCacheEntry
+    opts.previousCacheEntry
   )
   if (previouslyCachedImage) {
     return {
       buffer: previouslyCachedImage.buffer,
       contentType,
-      maxAge: previousCacheEntry?.curRevalidate || maxAge,
+      maxAge: opts?.previousCacheEntry?.cacheControl?.revalidate || maxAge,
       etag: previouslyCachedImage.etag,
       upstreamEtag: previouslyCachedImage.upstreamEtag,
     }
@@ -730,35 +792,35 @@ export async function imageOptimizer(
       contentType,
       quality,
       width,
+      concurrency: nextConfig.experimental.imgOptConcurrency,
+      limitInputPixels: nextConfig.experimental.imgOptMaxInputPixels,
+      sequentialRead: nextConfig.experimental.imgOptSequentialRead,
+      timeoutInSeconds: nextConfig.experimental.imgOptTimeoutInSeconds,
     })
-    if (optimizedBuffer) {
-      if (isDev && width <= BLUR_IMG_SIZE && quality === BLUR_QUALITY) {
-        // During `next dev`, we don't want to generate blur placeholders with webpack
-        // because it can delay starting the dev server. Instead, `next-image-loader.js`
-        // will inline a special url to lazily generate the blur placeholder at request time.
-        const meta = await getImageSize(optimizedBuffer)
-        const opts = {
-          blurWidth: meta.width,
-          blurHeight: meta.height,
-          blurDataURL: `data:${contentType};base64,${optimizedBuffer.toString(
-            'base64'
-          )}`,
-        }
-        optimizedBuffer = Buffer.from(unescape(getImageBlurSvg(opts)))
-        contentType = 'image/svg+xml'
+    if (opts.isDev && width <= BLUR_IMG_SIZE && quality === BLUR_QUALITY) {
+      // During `next dev`, we don't want to generate blur placeholders with webpack
+      // because it can delay starting the dev server. Instead, `next-image-loader.js`
+      // will inline a special url to lazily generate the blur placeholder at request time.
+      const meta = await getImageSize(optimizedBuffer)
+      const blurOpts = {
+        blurWidth: meta.width,
+        blurHeight: meta.height,
+        blurDataURL: `data:${contentType};base64,${optimizedBuffer.toString(
+          'base64'
+        )}`,
       }
-      return {
-        buffer: optimizedBuffer,
-        contentType,
-        maxAge: Math.max(maxAge, nextConfig.images.minimumCacheTTL),
-        etag: getImageEtag(optimizedBuffer),
-        upstreamEtag,
-      }
-    } else {
-      throw new ImageError(500, 'Unable to optimize buffer')
+      optimizedBuffer = Buffer.from(unescape(getImageBlurSvg(blurOpts)))
+      contentType = 'image/svg+xml'
+    }
+    return {
+      buffer: optimizedBuffer,
+      contentType,
+      maxAge,
+      etag: getImageEtag(optimizedBuffer),
+      upstreamEtag,
     }
   } catch (error) {
-    if (upstreamBuffer && upstreamType) {
+    if (upstreamType) {
       // If we fail to optimize, fallback to the original image
       return {
         buffer: upstreamBuffer,
@@ -766,6 +828,7 @@ export async function imageOptimizer(
         maxAge: nextConfig.images.minimumCacheTTL,
         etag: upstreamEtag,
         upstreamEtag,
+        error,
       }
     } else {
       throw new ImageError(

@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Result;
-use turbo_tasks::{run_once, trace::TraceRawVcs, TurboTasksApi};
+use turbo_tasks::{TurboTasksApi, run_once, trace::TraceRawVcs};
 
 pub struct Registration {
     execution_lock: OnceLock<()>,
@@ -90,20 +90,45 @@ where
     F: Future<Output = Result<T>> + Send + 'static,
     T: Debug + PartialEq + Eq + TraceRawVcs + Send + 'static,
 {
+    run_with_tt(registration, move |tt| run_once(tt, fut())).await
+}
+
+pub async fn run_with_tt<T, F>(
+    registration: &Registration,
+    fut: impl Fn(Arc<dyn TurboTasksApi>) -> F + Send + 'static,
+) -> Result<()>
+where
+    F: Future<Output = Result<T>> + Send + 'static,
+    T: Debug + PartialEq + Eq + TraceRawVcs + Send + 'static,
+{
     registration.ensure_registered();
 
     let name = closure_to_name(&fut);
     let tt = registration.create_turbo_tasks(&name, true);
     println!("Run #1 (without cache)");
-    let first = run_once(tt.clone(), fut()).await?;
-    println!("Run #2 (with memory cache, same TurboTasks instance)");
-    let second = run_once(tt.clone(), fut()).await?;
-    assert_eq!(first, second);
+    let start = std::time::Instant::now();
+    let first = fut(tt.clone()).await?;
+    println!("Run #1 took {:?}", start.elapsed());
+    for i in 2..10 {
+        println!("Run #{i} (with memory cache, same TurboTasks instance)");
+        let start = std::time::Instant::now();
+        let second = fut(tt.clone()).await?;
+        println!("Run #{i} took {:?}", start.elapsed());
+        assert_eq!(first, second);
+    }
+    let start = std::time::Instant::now();
     tt.stop_and_wait().await;
-    let tt = registration.create_turbo_tasks(&name, false);
-    println!("Run #3 (with persistent cache if available, new TurboTasks instance)");
-    let third = run_once(tt.clone(), fut()).await?;
-    tt.stop_and_wait().await;
-    assert_eq!(first, third);
+    println!("Stopping TurboTasks took {:?}", start.elapsed());
+    for i in 10..20 {
+        let tt = registration.create_turbo_tasks(&name, false);
+        println!("Run #{i} (with persistent cache if available, new TurboTasks instance)");
+        let start = std::time::Instant::now();
+        let third = fut(tt.clone()).await?;
+        println!("Run #{i} took {:?}", start.elapsed());
+        let start = std::time::Instant::now();
+        tt.stop_and_wait().await;
+        println!("Stopping TurboTasks took {:?}", start.elapsed());
+        assert_eq!(first, third);
+    }
     Ok(())
 }

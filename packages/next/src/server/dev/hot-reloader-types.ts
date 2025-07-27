@@ -4,9 +4,11 @@ import type { Duplex } from 'stream'
 import type { webpack } from 'next/dist/compiled/webpack/webpack'
 import type getBaseWebpackConfig from '../../build/webpack-config'
 import type { RouteDefinition } from '../route-definitions/route-definition'
-import type { Project, Update as TurbopackUpdate } from '../../build/swc'
+import type { Project, Update as TurbopackUpdate } from '../../build/swc/types'
 import type { VersionInfo } from './parse-version-info'
-import type { DebugInfo } from '../../client/components/react-dev-overlay/types'
+import type { DebugInfo } from '../../next-devtools/shared/types'
+import type { DevIndicatorServerState } from './dev-indicator-server-state'
+import type { DevToolsConfig } from '../../next-devtools/dev-overlay/shared'
 
 export const enum HMR_ACTIONS_SENT_TO_BROWSER {
   ADDED_PAGE = 'addedPage',
@@ -23,7 +25,9 @@ export const enum HMR_ACTIONS_SENT_TO_BROWSER {
   TURBOPACK_MESSAGE = 'turbopack-message',
   SERVER_ERROR = 'serverError',
   TURBOPACK_CONNECTED = 'turbopack-connected',
-  APP_ISR_MANIFEST = 'appIsrManifest',
+  ISR_MANIFEST = 'isrManifest',
+  DEV_INDICATOR = 'devIndicator',
+  DEVTOOLS_CONFIG = 'devtoolsConfig',
 }
 
 interface ServerErrorAction {
@@ -55,6 +59,8 @@ export interface SyncAction {
   versionInfo: VersionInfo
   updatedModules?: ReadonlyArray<string>
   debug?: DebugInfo
+  devIndicator: DevIndicatorServerState
+  devToolsConfig?: DevToolsConfig
 }
 interface BuiltAction {
   action: HMR_ACTIONS_SENT_TO_BROWSER.BUILT
@@ -76,10 +82,12 @@ interface RemovedPageAction {
 
 export interface ReloadPageAction {
   action: HMR_ACTIONS_SENT_TO_BROWSER.RELOAD_PAGE
+  data: string
 }
 
 interface ServerComponentChangesAction {
   action: HMR_ACTIONS_SENT_TO_BROWSER.SERVER_COMPONENT_CHANGES
+  hash: string
 }
 
 interface MiddlewareChangesAction {
@@ -110,8 +118,13 @@ export interface TurbopackConnectedAction {
 }
 
 export interface AppIsrManifestAction {
-  action: HMR_ACTIONS_SENT_TO_BROWSER.APP_ISR_MANIFEST
-  data: Record<string, false | number>
+  action: HMR_ACTIONS_SENT_TO_BROWSER.ISR_MANIFEST
+  data: Record<string, boolean>
+}
+
+export interface DevToolsConfigAction {
+  action: HMR_ACTIONS_SENT_TO_BROWSER.DEVTOOLS_CONFIG
+  data: DevToolsConfig
 }
 
 export type HMR_ACTION_TYPES =
@@ -130,6 +143,7 @@ export type HMR_ACTION_TYPES =
   | DevPagesManifestUpdateAction
   | ServerErrorAction
   | AppIsrManifestAction
+  | DevToolsConfigAction
 
 export type TurbopackMsgToBrowser =
   | { type: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_MESSAGE; data: any }
@@ -152,7 +166,6 @@ export interface NextJsHotReloaderInterface {
   setHmrServerError(error: Error | null): void
   clearHmrServerError(): void
   start(): Promise<void>
-  stop(): Promise<void>
   send(action: HMR_ACTION_TYPES): void
   getCompilationErrors(page: string): Promise<any[]>
   onHMR(
@@ -182,4 +195,5 @@ export interface NextJsHotReloaderInterface {
     definition: RouteDefinition | undefined
     url?: string
   }): Promise<void>
+  close(): void
 }

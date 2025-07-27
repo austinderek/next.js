@@ -1,36 +1,63 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{LockResult, Mutex, MutexGuard},
-};
+use std::sync::{LockResult, Mutex, MutexGuard};
 
 use concurrent_queue::ConcurrentQueue;
-use serde::{de::Visitor, Deserialize, Serialize};
-use turbo_tasks::Invalidator;
+use rustc_hash::FxHashMap;
+use serde::{Deserialize, Serialize, de::Visitor};
+use turbo_tasks::{Invalidator, ReadRef};
 
-pub struct InvalidatorMap {
-    queue: ConcurrentQueue<(String, Invalidator)>,
-    map: Mutex<HashMap<String, HashSet<Invalidator>>>,
+use crate::{FileContent, LinkContent};
+
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+pub enum WriteContent {
+    File(ReadRef<FileContent>),
+    Link(ReadRef<LinkContent>),
 }
 
-impl InvalidatorMap {
-    pub fn new() -> Self {
+type InnerMap = FxHashMap<String, FxHashMap<Invalidator, Option<WriteContent>>>;
+
+pub struct InvalidatorMap {
+    queue: ConcurrentQueue<(String, Invalidator, Option<WriteContent>)>,
+    map: Mutex<InnerMap>,
+}
+
+impl Default for InvalidatorMap {
+    fn default() -> Self {
         Self {
             queue: ConcurrentQueue::unbounded(),
             map: Default::default(),
         }
     }
+}
 
-    pub fn lock(&self) -> LockResult<MutexGuard<'_, HashMap<String, HashSet<Invalidator>>>> {
+impl InvalidatorMap {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn lock(&self) -> LockResult<MutexGuard<'_, InnerMap>> {
         let mut guard = self.map.lock()?;
-        while let Ok((key, value)) = self.queue.pop() {
-            guard.entry(key).or_default().insert(value);
+        while let Ok((key, value, write_content)) = self.queue.pop() {
+            guard.entry(key).or_default().insert(value, write_content);
         }
         Ok(guard)
     }
 
-    #[allow(unused_must_use)]
-    pub fn insert(&self, key: String, invalidator: Invalidator) {
-        self.queue.push((key, invalidator));
+    pub fn insert(
+        &self,
+        key: String,
+        invalidator: Invalidator,
+        write_content: Option<WriteContent>,
+    ) {
+        self.queue
+            .push((key, invalidator, write_content))
+            .unwrap_or_else(|err| {
+                let (key, ..) = err.into_inner();
+                // PushError<T> is not Debug
+                panic!(
+                    "failed to push {key:?} queue push should never fail, queue is unbounded and \
+                     never closed"
+                )
+            });
     }
 }
 

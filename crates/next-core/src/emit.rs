@@ -1,10 +1,10 @@
 use anyhow::Result;
 use tracing::Instrument;
 use turbo_tasks::{
+    FxIndexSet, ResolvedVc, TryFlatJoinIterExt, Vc,
     graph::{AdjacencyMap, GraphTraversal},
-    Completion, Completions, TryFlatJoinIterExt, ValueToString, Vc,
 };
-use turbo_tasks_fs::{rebase, FileSystemPath};
+use turbo_tasks_fs::{FileSystemPath, rebase};
 use turbopack_core::{
     asset::Asset,
     output::{OutputAsset, OutputAssets},
@@ -16,18 +16,21 @@ use turbopack_core::{
 /// Assets inside the given client root are rebased to the given client output
 /// path.
 #[turbo_tasks::function]
-pub fn emit_all_assets(
+pub async fn emit_all_assets(
     assets: Vc<OutputAssets>,
-    node_root: Vc<FileSystemPath>,
-    client_relative_path: Vc<FileSystemPath>,
-    client_output_path: Vc<FileSystemPath>,
-) -> Vc<Completion> {
+    node_root: FileSystemPath,
+    client_relative_path: FileSystemPath,
+    client_output_path: FileSystemPath,
+) -> Result<()> {
     emit_assets(
         all_assets_from_entries(assets),
         node_root,
         client_relative_path,
         client_output_path,
     )
+    .as_side_effect()
+    .await?;
+    Ok(())
 }
 
 /// Emits all assets transitively reachable from the given chunks, that are
@@ -38,56 +41,76 @@ pub fn emit_all_assets(
 #[turbo_tasks::function]
 pub async fn emit_assets(
     assets: Vc<OutputAssets>,
-    node_root: Vc<FileSystemPath>,
-    client_relative_path: Vc<FileSystemPath>,
-    client_output_path: Vc<FileSystemPath>,
-) -> Result<Vc<Completion>> {
-    Ok(Vc::<Completions>::cell(
-        assets
-            .await?
-            .iter()
-            .copied()
-            .map(|asset| async move {
-                let asset = asset.resolve().await?;
-                let path = asset.ident().path();
-                let span =
-                    tracing::info_span!("emit asset", name = path.to_string().await?.as_str());
+    node_root: FileSystemPath,
+    client_relative_path: FileSystemPath,
+    client_output_path: FileSystemPath,
+) -> Result<()> {
+    let _: Vec<()> = assets
+        .await?
+        .iter()
+        .copied()
+        .map(|asset| {
+            let node_root = node_root.clone();
+            let client_relative_path = client_relative_path.clone();
+            let client_output_path = client_output_path.clone();
+
+            async move {
+                let path = asset.path().owned().await?;
+                let span = tracing::info_span!("emit asset", name = %path.value_to_string().await?);
                 async move {
-                    let path = path.await?;
-                    Ok(if path.is_inside_ref(&*node_root.await?) {
-                        Some(emit(asset))
-                    } else if path.is_inside_ref(&*client_relative_path.await?) {
+                    Ok(if path.is_inside_ref(&node_root) {
+                        Some(emit(*asset).as_side_effect().await?)
+                    } else if path.is_inside_ref(&client_relative_path) {
                         // Client assets are emitted to the client output path, which is prefixed
                         // with _next. We need to rebase them to remove that
                         // prefix.
-                        Some(emit_rebase(asset, client_relative_path, client_output_path))
+                        Some(
+                            emit_rebase(*asset, client_relative_path, client_output_path)
+                                .as_side_effect()
+                                .await?,
+                        )
                     } else {
                         None
                     })
                 }
                 .instrument(span)
                 .await
-            })
-            .try_flat_join()
-            .await?,
-    )
-    .completed())
+            }
+        })
+        .try_flat_join()
+        .await?;
+    Ok(())
 }
 
 #[turbo_tasks::function]
-fn emit(asset: Vc<Box<dyn OutputAsset>>) -> Vc<Completion> {
-    asset.content().write(asset.ident().path())
+async fn emit(asset: Vc<Box<dyn OutputAsset>>) -> Result<()> {
+    asset
+        .content()
+        .resolve()
+        .await?
+        .write(asset.path().owned().await?)
+        .as_side_effect()
+        .await?;
+    Ok(())
 }
 
 #[turbo_tasks::function]
 async fn emit_rebase(
     asset: Vc<Box<dyn OutputAsset>>,
-    from: Vc<FileSystemPath>,
-    to: Vc<FileSystemPath>,
-) -> Result<Vc<Completion>> {
-    let path = rebase(asset.ident().path(), from, to);
+    from: FileSystemPath,
+    to: FileSystemPath,
+) -> Result<()> {
+    let path = rebase(asset.path().owned().await?, from, to)
+        .owned()
+        .await?;
     let content = asset.content();
-    Ok(content.resolve().await?.write(path.resolve().await?))
+    content
+        .resolve()
+        .await?
+        .write(path)
+        .as_side_effect()
+        .await?;
+    Ok(())
 }
 
 /// Walks the asset graph from multiple assets and collect all referenced
@@ -101,15 +124,17 @@ pub async fn all_assets_from_entries(entries: Vc<OutputAssets>) -> Result<Vc<Out
             .await
             .completed()?
             .into_inner()
-            .into_reverse_topological()
+            .into_postorder_topological()
+            .collect::<FxIndexSet<_>>()
+            .into_iter()
             .collect(),
     ))
 }
 
 /// Computes the list of all chunk children of a given chunk.
 async fn get_referenced_assets(
-    asset: Vc<Box<dyn OutputAsset>>,
-) -> Result<impl Iterator<Item = Vc<Box<dyn OutputAsset>>> + Send> {
+    asset: ResolvedVc<Box<dyn OutputAsset>>,
+) -> Result<impl Iterator<Item = ResolvedVc<Box<dyn OutputAsset>>> + Send> {
     Ok(asset
         .references()
         .await?

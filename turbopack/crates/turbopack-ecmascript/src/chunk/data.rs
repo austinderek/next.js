@@ -18,8 +18,8 @@ pub enum EcmascriptChunkData<'a> {
     },
 }
 
-impl<'a> EcmascriptChunkData<'a> {
-    pub fn new(chunk_data: &ChunkData) -> EcmascriptChunkData {
+impl EcmascriptChunkData<'_> {
+    pub fn new(chunk_data: &ChunkData) -> EcmascriptChunkData<'_> {
         let ChunkData {
             path,
             included,

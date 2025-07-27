@@ -71,7 +71,7 @@ if (testModeFromFile === 'e2e') {
     testMode = 'start'
   }
   assert(
-    validE2EModes.includes(testMode),
+    validE2EModes.includes(testMode!),
     `NEXT_TEST_MODE must be one of ${validE2EModes.join(
       ', '
     )} for e2e tests but received ${testMode}`
@@ -155,7 +155,7 @@ const setupTracing = () => {
  * to prevent relying on modules that shouldn't be
  */
 export async function createNext(
-  opts: NextInstanceOpts & { skipStart?: boolean }
+  opts: NextInstanceOpts & { skipStart?: boolean; patchFileDelay?: number }
 ): Promise<NextInstance> {
   try {
     if (nextInstance) {
@@ -164,7 +164,7 @@ export async function createNext(
 
     setupTracing()
     return await trace('createNext').traceAsyncFn(async (rootSpan) => {
-      const useTurbo = !!process.env.TEST_WASM
+      const useTurbo = !!process.env.NEXT_TEST_WASM
         ? false
         : opts?.turbo ?? shouldRunTurboDevTest()
 
@@ -194,6 +194,8 @@ export async function createNext(
         })
       }
 
+      nextInstance = nextInstance!
+
       nextInstance.on('destroy', () => {
         nextInstance = undefined
       })
@@ -204,7 +206,7 @@ export async function createNext(
         await rootSpan
           .traceChild('start next instance')
           .traceAsyncFn(async () => {
-            await nextInstance.start()
+            await nextInstance!.start()
           })
       }
 
@@ -272,6 +274,15 @@ export function nextTestSetup(
       const prop = next[property]
       return typeof prop === 'function' ? prop.bind(next) : prop
     },
+    set: function (_target, key, value) {
+      if (!next) {
+        throw new Error(
+          'next instance is not initialized yet, make sure you call methods on next instance in test body.'
+        )
+      }
+      next[key] = value
+      return true
+    },
   })
 
   return {
@@ -280,7 +291,8 @@ export function nextTestSetup(
     },
     get isTurbopack(): boolean {
       return Boolean(
-        !process.env.TEST_WASM && (options.turbo ?? shouldRunTurboDevTest())
+        !process.env.NEXT_TEST_WASM &&
+          (options.turbo ?? shouldRunTurboDevTest())
       )
     },
 

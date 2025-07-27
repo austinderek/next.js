@@ -24,6 +24,7 @@ export type EdgeSSRLoaderQuery = {
   pagesType: PAGE_TYPES
   sriEnabled: boolean
   cacheHandler?: string
+  cacheHandlers?: string
   preferredRegion: string | string[] | undefined
   middlewareConfig: string
   serverActions?: {
@@ -54,6 +55,9 @@ function getRouteModuleOptions(page: string) {
       bundlePath: '',
       filename: '',
     },
+    // edge runtime doesn't read from distDir or projectDir
+    distDir: '',
+    relativeProjectDir: '',
   }
 
   return options
@@ -62,7 +66,6 @@ function getRouteModuleOptions(page: string) {
 const edgeSSRLoader: webpack.LoaderDefinitionFunction<EdgeSSRLoaderQuery> =
   async function edgeSSRLoader(this) {
     const {
-      dev,
       page,
       absolutePagePath,
       absoluteAppPath,
@@ -73,12 +76,19 @@ const edgeSSRLoader: webpack.LoaderDefinitionFunction<EdgeSSRLoaderQuery> =
       stringifiedConfig: stringifiedConfigBase64,
       appDirLoader: appDirLoaderBase64,
       pagesType,
-      sriEnabled,
       cacheHandler,
+      cacheHandlers: cacheHandlersStringified,
       preferredRegion,
       middlewareConfig: middlewareConfigBase64,
-      serverActions,
     } = this.getOptions()
+
+    const cacheHandlers = JSON.parse(cacheHandlersStringified || '{}')
+
+    if (!cacheHandlers.default) {
+      cacheHandlers.default = require.resolve(
+        '../../../../server/lib/cache-handlers/default.external'
+      )
+    }
 
     const middlewareConfig: MiddlewareConfig = JSON.parse(
       Buffer.from(middlewareConfigBase64, 'base64').toString()
@@ -145,14 +155,7 @@ const edgeSSRLoader: webpack.LoaderDefinitionFunction<EdgeSSRLoaderQuery> =
           VAR_PAGE: page,
         },
         {
-          sriEnabled: JSON.stringify(sriEnabled),
           nextConfig: stringifiedConfig,
-          isServerComponent: JSON.stringify(isServerComponent),
-          dev: JSON.stringify(dev),
-          serverActions:
-            typeof serverActions === 'undefined'
-              ? 'undefined'
-              : JSON.stringify(serverActions),
         },
         {
           incrementalCacheHandler: cacheHandler ?? null,
@@ -169,10 +172,7 @@ const edgeSSRLoader: webpack.LoaderDefinitionFunction<EdgeSSRLoaderQuery> =
           VAR_MODULE_GLOBAL_ERROR: errorPath,
         },
         {
-          pagesType: JSON.stringify(pagesType),
-          sriEnabled: JSON.stringify(sriEnabled),
           nextConfig: stringifiedConfig,
-          dev: JSON.stringify(dev),
           pageRouteModuleOptions: JSON.stringify(getRouteModuleOptions(page)),
           errorRouteModuleOptions: JSON.stringify(
             getRouteModuleOptions('/_error')

@@ -3,14 +3,12 @@ import type { PagesManifest } from './webpack/plugins/pages-manifest-plugin'
 import type { ExportPathMap, NextConfigComplete } from '../server/config-shared'
 import type { MiddlewareManifest } from './webpack/plugins/middleware-plugin'
 import type { ActionManifest } from './webpack/plugins/flight-client-entry-plugin'
-import type { ExportAppOptions } from '../export/types'
-import type { Revalidate } from '../server/lib/revalidate'
+import type { CacheControl, Revalidate } from '../server/lib/cache-control'
 
 import '../lib/setup-exception-listeners'
 
 import { loadEnvConfig, type LoadedEnvFiles } from '@next/env'
 import { bold, yellow } from '../lib/picocolors'
-import crypto from 'crypto'
 import { makeRe } from 'next/dist/compiled/picomatch'
 import { existsSync, promises as fs } from 'fs'
 import os from 'os'
@@ -19,7 +17,6 @@ import { defaultConfig } from '../server/config-shared'
 import devalue from 'next/dist/compiled/devalue'
 import findUp from 'next/dist/compiled/find-up'
 import { nanoid } from 'next/dist/compiled/nanoid/index.cjs'
-import { Sema } from 'next/dist/compiled/async-sema'
 import path from 'path'
 import {
   STATIC_STATUS_PAGE_GET_INITIAL_PROPS_ERROR,
@@ -30,6 +27,13 @@ import {
   RSC_PREFETCH_SUFFIX,
   RSC_SUFFIX,
   NEXT_RESUME_HEADER,
+  PRERENDER_REVALIDATE_HEADER,
+  PRERENDER_REVALIDATE_ONLY_GENERATED_HEADER,
+  NEXT_CACHE_REVALIDATE_TAG_TOKEN_HEADER,
+  NEXT_CACHE_REVALIDATED_TAGS_HEADER,
+  MATCHED_PATH_HEADER,
+  RSC_SEGMENTS_DIR_SUFFIX,
+  RSC_SEGMENT_SUFFIX,
 } from '../lib/constants'
 import { FileType, fileExists } from '../lib/file-exists'
 import { findPagesDir } from '../lib/find-pages-dir'
@@ -46,7 +50,6 @@ import type {
 import { nonNullable } from '../lib/non-nullable'
 import { recursiveDelete } from '../lib/recursive-delete'
 import { verifyPartytownSetup } from '../lib/verify-partytown-setup'
-import { validateTurboNextConfig } from '../lib/turbopack-warning'
 import {
   BUILD_ID_FILE,
   BUILD_MANIFEST,
@@ -75,18 +78,16 @@ import {
   FUNCTIONS_CONFIG_MANIFEST,
   UNDERSCORE_NOT_FOUND_ROUTE_ENTRY,
   UNDERSCORE_NOT_FOUND_ROUTE,
+  DYNAMIC_CSS_MANIFEST,
+  TURBOPACK_CLIENT_MIDDLEWARE_MANIFEST,
 } from '../shared/lib/constants'
-import {
-  getSortedRoutes,
-  isDynamicRoute,
-  getSortedRouteObjects,
-} from '../shared/lib/router/utils'
+import { isDynamicRoute } from '../shared/lib/router/utils'
 import type { __ApiPreviewProps } from '../server/api-utils'
 import loadConfig from '../server/config'
 import type { BuildManifest } from '../server/get-page-files'
 import { normalizePagePath } from '../shared/lib/page-path/normalize-page-path'
 import { getPagePath } from '../server/require'
-import * as ciEnvironment from '../telemetry/ci-info'
+import * as ciEnvironment from '../server/ci-info'
 import {
   turborepoTraceAccess,
   TurborepoAccessTraceResult,
@@ -101,13 +102,12 @@ import {
   EVENT_BUILD_FEATURE_USAGE,
   eventPackageUsedInGetServerSideProps,
   eventBuildCompleted,
+  eventBuildFailed,
 } from '../telemetry/events'
 import type { EventBuildFeatureUsage } from '../telemetry/events'
 import { Telemetry } from '../telemetry/storage'
-import { hadUnsupportedValue } from './analysis/get-page-static-info'
 import {
   createPagesMapping,
-  getPageFromPath,
   getStaticInfoIncludingLayouts,
   sortByPageExts,
 } from './entries'
@@ -128,9 +128,10 @@ import {
   isAppBuiltinNotFoundPage,
   collectRoutesUsingEdgeRuntime,
   collectMeta,
-  // getSupportedBrowsers,
 } from './utils'
-import type { PageInfo, PageInfos, AppConfig, PrerenderedRoute } from './utils'
+import type { PageInfo, PageInfos } from './utils'
+import type { PrerenderedRoute } from './static-paths/types'
+import type { AppSegmentConfig } from './segment-config/app/app-segment-config'
 import { writeBuildId } from './write-build-id'
 import { normalizeLocalePath } from '../shared/lib/i18n/normalize-locale-path'
 import isError from '../lib/is-error'
@@ -138,13 +139,7 @@ import type { NextError } from '../lib/is-error'
 import { isEdgeRuntime } from '../lib/is-edge-runtime'
 import { recursiveCopy } from '../lib/recursive-copy'
 import { recursiveReadDir } from '../lib/recursive-readdir'
-import {
-  loadBindings,
-  lockfilePatchPromise,
-  teardownTraceSubscriber,
-  teardownHeapProfiler,
-  createDefineEnv,
-} from './swc'
+import { lockfilePatchPromise, teardownTraceSubscriber } from './swc'
 import { getNamedRouteRegex } from '../shared/lib/router/utils/route-regex'
 import { getFilesInDir } from '../lib/get-files-in-dir'
 import { eventSwcPlugins } from '../telemetry/events/swc-plugins'
@@ -156,6 +151,9 @@ import {
   RSC_CONTENT_TYPE_HEADER,
   NEXT_ROUTER_STATE_TREE_HEADER,
   NEXT_DID_POSTPONE_HEADER,
+  NEXT_ROUTER_SEGMENT_PREFETCH_HEADER,
+  NEXT_REWRITTEN_PATH_HEADER,
+  NEXT_REWRITTEN_QUERY_HEADER,
 } from '../client/components/app-router-headers'
 import { webpackBuild } from './webpack-build'
 import { NextBuildContext, type MappedPages } from './build-context'
@@ -174,45 +172,48 @@ import {
   recordFrameworkVersion,
   updateBuildDiagnostics,
   recordFetchMetrics,
-  updateIncrementalBuildMetrics,
 } from '../diagnostics/build-diagnostics'
 import { getStartServerInfo, logStartInfo } from '../server/lib/app-info-log'
 import type { NextEnabledDirectories } from '../server/base-server'
 import { hasCustomExportOutput } from '../export/utils'
-import {
-  getTurbopackJsConfig,
-  handleEntrypoints,
-  type EntryIssuesMap,
-  handleRouteType,
-  handlePagesErrorRoute,
-  formatIssue,
-  isRelevantWarning,
-} from '../server/dev/turbopack-utils'
-import { TurbopackManifestLoader } from '../server/dev/turbopack/manifest-loader'
-import type { Entrypoints } from '../server/dev/turbopack/types'
 import { buildCustomRoute } from '../lib/build-custom-route'
-import { createProgress } from './progress'
 import { traceMemoryUsage } from '../lib/memory/trace'
-import { generateEncryptionKeyBase64 } from '../server/app-render/encryption-utils'
+import { generateEncryptionKeyBase64 } from '../server/app-render/encryption-utils-server'
 import type { DeepReadonly } from '../shared/lib/deep-readonly'
 import uploadTrace from '../trace/upload-trace'
 import {
   checkIsAppPPREnabled,
   checkIsRoutePPREnabled,
 } from '../server/lib/experimental/ppr'
-import {
-  detectChangedEntries,
-  type DetectedEntriesResult,
-} from './flying-shuttle/detect-changed-entries'
-import { storeShuttle } from './flying-shuttle/store-shuttle'
-import { stitchBuilds } from './flying-shuttle/stitch-builds'
-import { inlineStaticEnv } from './flying-shuttle/inline-static-env'
 import { FallbackMode, fallbackModeToFallbackField } from '../lib/fallback'
 import { RenderingMode } from './rendering-mode'
+import { InvariantError } from '../shared/lib/invariant-error'
+import { HTML_LIMITED_BOT_UA_RE_STRING } from '../shared/lib/router/utils/is-bot'
+import type { UseCacheTrackerKey } from './webpack/plugins/telemetry-plugin/use-cache-tracker-utils'
+import {
+  buildPrefetchSegmentDataRoute,
+  type PrefetchSegmentDataRoute,
+} from '../server/lib/router-utils/build-prefetch-segment-data-route'
+
+import { turbopackBuild } from './turbopack-build'
+import { isPersistentCachingEnabled } from '../shared/lib/turbopack/utils'
+import { inlineStaticEnv } from '../lib/inline-static-env'
+import { populateStaticEnv } from '../lib/static-env'
+import { durationToString } from './duration-to-string'
+import { traceGlobals } from '../trace/shared'
+import { extractNextErrorCode } from '../lib/error-telemetry-utils'
+import { runAfterProductionCompile } from './after-production-compile'
+import { generatePreviewKeys } from './preview-key-utils'
+import { handleBuildComplete } from './adapter/build-complete'
+import {
+  sortPageObjects,
+  sortPages,
+  sortSortableRouteObjects,
+} from '../shared/lib/router/utils/sortable-routes'
 
 type Fallback = null | boolean | string
 
-export interface SsgRoute {
+export interface PrerenderManifestRoute {
   dataRoute: string | null
   experimentalBypassFor?: RouteHas[]
 
@@ -227,9 +228,19 @@ export interface SsgRoute {
   initialStatus?: number
 
   /**
-   * The revalidation configuration for this route.
+   * The revalidate value for this route. This might be inferred from:
+   * - route segment configs
+   * - fetch calls
+   * - unstable_cache
+   * - "use cache"
    */
   initialRevalidateSeconds: Revalidate
+
+  /**
+   * The expire value for this route, which is inferred from the "use cache"
+   * functions that are used by the route, or the expireTime config.
+   */
+  initialExpireSeconds: number | undefined
 
   /**
    * The prefetch data route associated with this page. If not defined, this
@@ -253,9 +264,15 @@ export interface SsgRoute {
    * route.
    */
   renderingMode: RenderingMode | undefined
+
+  /**
+   * The headers that are allowed to be used when revalidating this route. These
+   * are used internally by Next.js to revalidate routes.
+   */
+  allowHeader: string[]
 }
 
-export interface DynamicSsgRoute {
+export interface DynamicPrerenderManifestRoute {
   dataRoute: string | null
   dataRouteRegex: string | null
   experimentalBypassFor?: RouteHas[]
@@ -268,6 +285,11 @@ export interface DynamicSsgRoute {
   fallbackRevalidate: Revalidate | undefined
 
   /**
+   * When defined, it describes the expire configuration for the fallback route.
+   */
+  fallbackExpire: number | undefined
+
+  /**
    * The headers that should used when serving the fallback.
    */
   fallbackHeaders?: Record<string, string>
@@ -276,6 +298,18 @@ export interface DynamicSsgRoute {
    * The status code that should be used when serving the fallback.
    */
   fallbackStatus?: number
+
+  /**
+   * The root params that are unknown for this fallback route.
+   */
+  fallbackRootParams: readonly string[] | undefined
+
+  /**
+   * The source route that this fallback route is based on. This is a reference
+   * so that we can associate this dynamic route with the correct source.
+   */
+  fallbackSourceRoute: string | undefined
+
   prefetchDataRoute: string | null | undefined
   prefetchDataRouteRegex: string | null | undefined
   routeRegex: string
@@ -290,12 +324,31 @@ export interface DynamicSsgRoute {
    * route.
    */
   renderingMode: RenderingMode | undefined
+
+  /**
+   * The headers that are allowed to be used when revalidating this route. These
+   * are used internally by Next.js to revalidate routes.
+   */
+  allowHeader: string[]
 }
+
+/**
+ * The headers that are allowed to be used when revalidating routes. Currently
+ * this includes both headers used by the pages and app routers.
+ */
+const ALLOWED_HEADERS: string[] = [
+  'host',
+  MATCHED_PATH_HEADER,
+  PRERENDER_REVALIDATE_HEADER,
+  PRERENDER_REVALIDATE_ONLY_GENERATED_HEADER,
+  NEXT_CACHE_REVALIDATED_TAGS_HEADER,
+  NEXT_CACHE_REVALIDATE_TAG_TOKEN_HEADER,
+]
 
 export type PrerenderManifest = {
   version: 4
-  routes: { [route: string]: SsgRoute }
-  dynamicRoutes: { [route: string]: DynamicSsgRoute }
+  routes: { [route: string]: PrerenderManifestRoute }
+  dynamicRoutes: { [route: string]: DynamicPrerenderManifestRoute }
   notFoundRoutes: string[]
   preview: __ApiPreviewProps
 }
@@ -307,6 +360,39 @@ type ManifestBuiltRoute = {
   regex: string
 }
 
+export enum RouteType {
+  /**
+   * `PAGES` represents all the React pages that are under `pages/`.
+   */
+  PAGES = 'PAGES',
+  /**
+   * `PAGES_API` represents all the API routes under `pages/api/`.
+   */
+  PAGES_API = 'PAGES_API',
+  /**
+   * `APP_PAGE` represents all the React pages that are under `app/` with the
+   * filename of `page.{j,t}s{,x}`.
+   */
+  APP_PAGE = 'APP_PAGE',
+  /**
+   * `APP_ROUTE` represents all the API routes and metadata routes that are under `app/` with the
+   * filename of `route.{j,t}s{,x}`.
+   */
+  APP_ROUTE = 'APP_ROUTE',
+
+  /**
+   * `IMAGE` represents all the images that are generated by `next/image`.
+   */
+  // IMAGE = 'IMAGE',
+
+  /**
+   * `STATIC_FILE` represents a static file (ie /_next/static)
+   */
+  STATIC_FILE = 'STATIC_FILE',
+
+  MIDDLEWARE = 'MIDDLEWARE',
+}
+
 export type ManifestRewriteRoute = ManifestBuiltRoute & Rewrite
 export type ManifestRedirectRoute = ManifestBuiltRoute & Redirect
 export type ManifestHeaderRoute = ManifestBuiltRoute & Header
@@ -315,9 +401,26 @@ export type ManifestRoute = ManifestBuiltRoute & {
   page: string
   namedRegex?: string
   routeKeys?: { [key: string]: string }
+  prefetchSegmentDataRoutes?: PrefetchSegmentDataRoute[]
+
+  /**
+   * If true, this indicates that the route should not be considered for routing
+   * for the internal router, and instead has been added to support external
+   * routers.
+   */
+  skipInternalRouting?: boolean
 }
 
-export type ManifestDataRoute = {
+type DynamicManifestRoute = ManifestRoute & {
+  /**
+   * The source page that this route is based on. This is used to determine the
+   * source page for the route and is only relevant for app pages where PPR is
+   * enabled and the page differs from the source page.
+   */
+  sourcePage: string | undefined
+}
+
+type ManifestDataRoute = {
   page: string
   routeKeys?: { [key: string]: string }
   dataRouteRegex: string
@@ -328,26 +431,24 @@ export type RoutesManifest = {
   version: number
   pages404: boolean
   basePath: string
-  redirects: Array<Redirect>
-  rewrites?:
-    | Array<ManifestRewriteRoute>
-    | {
-        beforeFiles: Array<ManifestRewriteRoute>
-        afterFiles: Array<ManifestRewriteRoute>
-        fallback: Array<ManifestRewriteRoute>
-      }
+  redirects: Array<ManifestRedirectRoute>
+  rewrites: {
+    beforeFiles: Array<ManifestRewriteRoute>
+    afterFiles: Array<ManifestRewriteRoute>
+    fallback: Array<ManifestRewriteRoute>
+  }
   headers: Array<ManifestHeaderRoute>
   staticRoutes: Array<ManifestRoute>
-  dynamicRoutes: Array<ManifestRoute>
+  dynamicRoutes: ReadonlyArray<DynamicManifestRoute>
   dataRoutes: Array<ManifestDataRoute>
   i18n?: {
-    domains?: Array<{
+    domains?: ReadonlyArray<{
       http?: true
       domain: string
-      locales?: string[]
+      locales?: readonly string[]
       defaultLocale: string
     }>
-    locales: string[]
+    locales: readonly string[]
     defaultLocale: string
     localeDetection?: false
   }
@@ -359,6 +460,13 @@ export type RoutesManifest = {
     prefetchHeader: typeof NEXT_ROUTER_PREFETCH_HEADER
     suffix: typeof RSC_SUFFIX
     prefetchSuffix: typeof RSC_PREFETCH_SUFFIX
+    prefetchSegmentHeader: typeof NEXT_ROUTER_SEGMENT_PREFETCH_HEADER
+    prefetchSegmentDirSuffix: typeof RSC_SEGMENTS_DIR_SUFFIX
+    prefetchSegmentSuffix: typeof RSC_SEGMENT_SUFFIX
+  }
+  rewriteHeaders: {
+    pathHeader: typeof NEXT_REWRITTEN_PATH_HEADER
+    queryHeader: typeof NEXT_REWRITTEN_QUERY_HEADER
   }
   skipMiddlewareUrlNormalize?: boolean
   caseSensitive?: boolean
@@ -379,9 +487,35 @@ export type RoutesManifest = {
   }
 }
 
-function pageToRoute(page: string) {
-  const routeRegex = getNamedRouteRegex(page, true)
+/**
+ * Converts a page to a manifest route.
+ *
+ * @param page The page to convert to a route.
+ * @returns A route object.
+ */
+function pageToRoute(page: string): ManifestRoute
+/**
+ * Converts a page to a dynamic manifest route.
+ *
+ * @param page The page to convert to a route.
+ * @param sourcePage The source page that this route is based on. This is used
+ * to determine the source page for the route and is only relevant for app
+ * pages when PPR is enabled on them.
+ * @returns A route object.
+ */
+function pageToRoute(
+  page: string,
+  sourcePage: string | undefined
+): DynamicManifestRoute
+function pageToRoute(
+  page: string,
+  sourcePage?: string
+): DynamicManifestRoute | ManifestRoute {
+  const routeRegex = getNamedRouteRegex(page, {
+    prefixRouteKeys: true,
+  })
   return {
+    sourcePage,
     page,
     regex: normalizeRouteRegex(routeRegex.re.source),
     routeKeys: routeRegex.routeKeys,
@@ -437,7 +571,11 @@ async function writeClientSsgManifest(
     buildId,
     distDir,
     locales,
-  }: { buildId: string; distDir: string; locales: string[] }
+  }: {
+    buildId: string
+    distDir: string
+    locales: readonly string[] | undefined
+  }
 ) {
   const ssgPages = new Set<string>(
     [
@@ -459,9 +597,22 @@ async function writeClientSsgManifest(
   )
 }
 
-interface FunctionsConfigManifest {
+export interface FunctionsConfigManifest {
   version: number
-  functions: Record<string, Record<string, string | number>>
+  functions: Record<
+    string,
+    {
+      maxDuration?: number | undefined
+      runtime?: 'nodejs'
+      regions?: string[] | string
+      matchers?: Array<{
+        regexp: string
+        originalSource: string
+        has?: Rewrite['has']
+        missing?: Rewrite['has']
+      }>
+    }
+  >
 }
 
 async function writeFunctionsConfigManifest(
@@ -474,7 +625,7 @@ async function writeFunctionsConfigManifest(
   )
 }
 
-interface RequiredServerFilesManifest {
+export interface RequiredServerFilesManifest {
   version: number
   config: NextConfigComplete
   appDir: string
@@ -500,13 +651,25 @@ async function writeImagesManifest(
   const images = { ...config.images }
   const { deviceSizes, imageSizes } = images
   ;(images as any).sizes = [...deviceSizes, ...imageSizes]
+
+  // By default, remotePatterns will allow no remote images ([])
   images.remotePatterns = (config?.images?.remotePatterns || []).map((p) => ({
-    // Should be the same as matchRemotePattern()
-    protocol: p.protocol,
+    // Modifying the manifest should also modify matchRemotePattern()
+    protocol: p.protocol?.replace(/:$/, '') as 'http' | 'https' | undefined,
     hostname: makeRe(p.hostname).source,
     port: p.port,
     pathname: makeRe(p.pathname ?? '**', { dot: true }).source,
+    search: p.search,
   }))
+
+  // By default, localPatterns will allow all local images (undefined)
+  if (config?.images?.localPatterns) {
+    images.localPatterns = config.images.localPatterns.map((p) => ({
+      // Modifying the manifest should also modify matchLocalPattern()
+      pathname: makeRe(p.pathname ?? '**', { dot: true }).source,
+      search: p.search,
+    }))
+  }
 
   await writeManifest(path.join(distDir, IMAGES_MANIFEST), {
     version: 1,
@@ -523,6 +686,7 @@ async function writeStandaloneDirectory(
   outputFileTracingRoot: string,
   requiredServerFiles: RequiredServerFilesManifest,
   middlewareManifest: MiddlewareManifest,
+  hasNodeMiddleware: boolean,
   hasInstrumentationHook: boolean,
   staticPages: Set<string>,
   loadedEnvFiles: LoadedEnvFiles,
@@ -540,6 +704,7 @@ async function writeStandaloneDirectory(
         outputFileTracingRoot,
         requiredServerFiles.config,
         middlewareManifest,
+        hasNodeMiddleware,
         hasInstrumentationHook,
         staticPages
       )
@@ -566,6 +731,23 @@ async function writeStandaloneDirectory(
         })
         await fs.copyFile(filePath, outputPath)
       }
+
+      if (hasNodeMiddleware) {
+        const middlewareOutput = path.join(
+          distDir,
+          STANDALONE_DIRECTORY,
+          path.relative(outputFileTracingRoot, distDir),
+          SERVER_DIRECTORY,
+          'middleware.js'
+        )
+
+        await fs.mkdir(path.dirname(middlewareOutput), { recursive: true })
+        await fs.copyFile(
+          path.join(distDir, SERVER_DIRECTORY, 'middleware.js'),
+          middlewareOutput
+        )
+      }
+
       await recursiveCopy(
         path.join(distDir, SERVER_DIRECTORY, 'pages'),
         path.join(
@@ -627,18 +809,31 @@ const staticWorkerExposedMethods = [
   'getDefinedNamedExports',
   'exportPages',
 ] as const
-type StaticWorker = typeof import('./worker') & Worker
+export type StaticWorker = typeof import('./worker') & Worker
 export function createStaticWorker(
   config: NextConfigComplete,
-  onActivity?: () => void
+  options: {
+    debuggerPortOffset: number
+    progress?: {
+      run: () => void
+      clear: () => void
+    }
+  }
 ): StaticWorker {
+  const { debuggerPortOffset, progress } = options
   return new Worker(staticWorkerPath, {
     logger: Log,
     numWorkers: getNumberOfWorkers(config),
-    onActivity,
-    forkOptions: {
-      env: process.env,
+    onActivity: () => {
+      progress?.run()
     },
+    onActivityAbort: () => {
+      progress?.clear()
+    },
+    debuggerPortOffset,
+    enableSourceMaps: config.experimental.enablePrerenderSourceMaps,
+    // remove --max-old-space-size flag as it can cause memory issues.
+    isolatedMemory: true,
     enableWorkerThreads: config.experimental.workerThreads,
     exposedMethods: staticWorkerExposedMethods,
   }) as StaticWorker
@@ -651,11 +846,8 @@ async function writeFullyStaticExport(
   configOutDir: string,
   nextBuildSpan: Span
 ): Promise<void> {
-  const exportApp = require('../export')
+  const exportApp = (require('../export') as typeof import('../export'))
     .default as typeof import('../export').default
-
-  const pagesWorker = createStaticWorker(config)
-  const appWorker = createStaticWorker(config)
 
   await exportApp(
     dir,
@@ -669,9 +861,6 @@ async function writeFullyStaticExport(
     },
     nextBuildSpan
   )
-
-  pagesWorker.end()
-  appWorker.end()
 }
 
 async function getBuildId(
@@ -688,27 +877,28 @@ async function getBuildId(
     .traceAsyncFn(() => generateBuildId(config.generateBuildId, nanoid))
 }
 
-const IS_TURBOPACK_BUILD = process.env.TURBOPACK && process.env.TURBOPACK_BUILD
-
 export default async function build(
   dir: string,
   reactProductionProfiling = false,
   debugOutput = false,
+  debugPrerender = false,
   runLint = true,
   noMangling = false,
   appDirOnly = false,
-  turboNextBuild = false,
-  experimentalBuildMode: 'default' | 'compile' | 'generate',
+  isTurbopack = false,
+  experimentalBuildMode: 'default' | 'compile' | 'generate' | 'generate-env',
   traceUploadUrl: string | undefined
 ): Promise<void> {
   const isCompileMode = experimentalBuildMode === 'compile'
   const isGenerateMode = experimentalBuildMode === 'generate'
+  NextBuildContext.isCompileMode = isCompileMode
+  const buildStartTime = Date.now()
 
   let loadedConfig: NextConfigComplete | undefined
   try {
     const nextBuildSpan = trace('next-build', undefined, {
       buildMode: experimentalBuildMode,
-      isTurboBuild: String(turboNextBuild),
+      isTurboBuild: String(isTurbopack),
       version: process.env.__NEXT_VERSION as string,
     })
 
@@ -717,6 +907,7 @@ export default async function build(
     NextBuildContext.appDirOnly = appDirOnly
     NextBuildContext.reactProductionProfiling = reactProductionProfiling
     NextBuildContext.noMangling = noMangling
+    NextBuildContext.debugPrerender = debugPrerender
 
     await nextBuildSpan.traceAsyncFn(async () => {
       // attempt to load global env values so they are available in next.config.js
@@ -735,6 +926,7 @@ export default async function build(
                 // Log for next.config loading process
                 silent: false,
                 reactProductionProfiling,
+                debugPrerender,
               }),
             turborepoAccessTraceResult
           )
@@ -750,6 +942,7 @@ export default async function build(
         config.distDir = '.next'
       }
       const distDir = path.join(dir, config.distDir)
+      NextBuildContext.distDir = distDir
       setGlobal('phase', PHASE_PRODUCTION_BUILD)
       setGlobal('distDir', distDir)
 
@@ -761,16 +954,31 @@ export default async function build(
       )
       NextBuildContext.buildId = buildId
 
-      const { flyingShuttle } = config.experimental
-      const isFullFlyingShuttle = flyingShuttle?.mode === 'full'
-      const isStoreOnlyFlyingShuttle = flyingShuttle?.mode === 'store-only'
+      if (experimentalBuildMode === 'generate-env') {
+        if (isTurbopack) {
+          Log.warn('generate-env is not needed with turbopack')
+          process.exit(0)
+        }
+        Log.info('Inlining static env ...')
+        await nextBuildSpan
+          .traceChild('inline-static-env')
+          .traceAsyncFn(async () => {
+            await inlineStaticEnv({
+              distDir,
+              config,
+            })
+          })
 
-      const shuttleDir = path.join(distDir, 'cache', 'shuttle')
+        Log.info('Complete')
+        await flushAllTraces()
+        teardownTraceSubscriber()
+        process.exit(0)
+      }
 
-      if (flyingShuttle) {
-        await fs.mkdir(shuttleDir, {
-          recursive: true,
-        })
+      // when using compile mode static env isn't inlined so we
+      // need to populate in normal runtime env
+      if (isCompileMode || isGenerateMode) {
+        populateStaticEnv(config)
       }
 
       const customRoutes: CustomRoutes = await nextBuildSpan
@@ -784,7 +992,7 @@ export default async function build(
         ...rewrites.fallback,
       ]
       const hasRewrites = combinedRewrites.length > 0
-
+      NextBuildContext.hasRewrites = hasRewrites
       NextBuildContext.originalRewrites = config._originalRewrites
       NextBuildContext.originalRedirects = config._originalRedirects
 
@@ -806,7 +1014,10 @@ export default async function build(
 
       // Generate a random encryption key for this build.
       // This key is used to encrypt cross boundary values and can be used to generate hashes.
-      const encryptionKey = await generateEncryptionKeyBase64()
+      const encryptionKey = await generateEncryptionKeyBase64({
+        isBuild: true,
+        distDir,
+      })
       NextBuildContext.encryptionKey = encryptionKey
 
       const isSrcDir = path
@@ -836,12 +1047,17 @@ export default async function build(
       )
 
       // Always log next version first then start rest jobs
-      const { envInfo, expFeatureInfo } = await getStartServerInfo(dir, false)
+      const { envInfo, experimentalFeatures } = await getStartServerInfo({
+        dir,
+        dev: false,
+        debugPrerender,
+      })
+
       logStartInfo({
         networkUrl: null,
         appUrl: null,
         envInfo,
-        expFeatureInfo,
+        experimentalFeatures,
       })
 
       const ignoreESLint = Boolean(config.eslint.ignoreDuringBuilds)
@@ -926,32 +1142,6 @@ export default async function build(
             )
           : []
 
-      let changedPagePathsResult:
-        | undefined
-        | {
-            changed: DetectedEntriesResult
-            unchanged: DetectedEntriesResult
-          }
-
-      if (pagesPaths && isFullFlyingShuttle) {
-        await nextBuildSpan
-          .traceChild('detect-changed-entries', { type: 'pages' })
-          .traceAsyncFn(async () => {
-            changedPagePathsResult = await detectChangedEntries({
-              pagesPaths,
-              pageExtensions: config.pageExtensions,
-              distDir,
-              shuttleDir,
-              config,
-            })
-            await updateIncrementalBuildMetrics({
-              changedPagePaths: changedPagePathsResult.changed.pages,
-              unchangedPagePaths: changedPagePathsResult.unchanged.pages,
-            })
-            pagesPaths = changedPagePathsResult.changed.pages
-          })
-      }
-
       const middlewareDetectionRegExp = new RegExp(
         `^${MIDDLEWARE_FILENAME}\\.(?:${config.pageExtensions.join('|')})$`
       )
@@ -982,11 +1172,10 @@ export default async function build(
 
       NextBuildContext.hasInstrumentationHook = hasInstrumentationHook
 
-      const previewProps: __ApiPreviewProps = {
-        previewModeId: crypto.randomBytes(16).toString('hex'),
-        previewModeSigningKey: crypto.randomBytes(32).toString('hex'),
-        previewModeEncryptionKey: crypto.randomBytes(32).toString('hex'),
-      }
+      const previewProps: __ApiPreviewProps = await generatePreviewKeys({
+        isBuild: true,
+        distDir,
+      })
       NextBuildContext.previewProps = previewProps
 
       const mappedPages = await nextBuildSpan
@@ -1005,12 +1194,6 @@ export default async function build(
 
       let mappedAppPages: MappedPages | undefined
       let denormalizedAppPages: string[] | undefined
-      let changedAppPathsResult:
-        | undefined
-        | {
-            changed: DetectedEntriesResult
-            unchanged: DetectedEntriesResult
-          }
 
       if (appDir) {
         const providedAppPaths: string[] = JSON.parse(
@@ -1031,25 +1214,6 @@ export default async function build(
                   ignorePartFilter: (part) => part.startsWith('_'),
                 })
               )
-
-        if (appPaths && isFullFlyingShuttle) {
-          await nextBuildSpan
-            .traceChild('detect-changed-entries', { type: 'app' })
-            .traceAsyncFn(async () => {
-              changedAppPathsResult = await detectChangedEntries({
-                appPaths,
-                pageExtensions: config.pageExtensions,
-                distDir,
-                shuttleDir,
-                config,
-              })
-              await updateIncrementalBuildMetrics({
-                changedAppPaths: changedAppPathsResult.changed.app,
-                unchangedAppPaths: changedAppPathsResult.unchanged.app,
-              })
-              appPaths = changedAppPathsResult.changed.app
-            })
-        }
 
         mappedAppPages = await nextBuildSpan
           .traceChild('create-app-mapping')
@@ -1113,7 +1277,7 @@ export default async function build(
       }
 
       // Turbopack already handles conflicting app and page routes.
-      if (!IS_TURBOPACK_BUILD) {
+      if (!isTurbopack) {
         const numConflictingAppPaths = conflictingAppPagePaths.length
         if (mappedAppPages && numConflictingAppPaths > 0) {
           Log.error(
@@ -1190,22 +1354,40 @@ export default async function build(
         config.basePath ? `${config.basePath}${p}` : p
       )
 
+      const isAppCacheComponentsEnabled = Boolean(
+        config.experimental.cacheComponents
+      )
+      const isAuthInterruptsEnabled = Boolean(
+        config.experimental.authInterrupts
+      )
       const isAppPPREnabled = checkIsAppPPREnabled(config.experimental.ppr)
 
       const routesManifestPath = path.join(distDir, ROUTES_MANIFEST)
+      const dynamicRoutes: Array<DynamicManifestRoute> = []
+
+      /**
+       * A map of all the pages to their sourcePage value. This is only used for
+       * routes that have PPR enabled and clientSegmentEnabled is true.
+       */
+      const sourcePages = new Map<string, string>()
       const routesManifest: RoutesManifest = nextBuildSpan
         .traceChild('generate-routes-manifest')
         .traceFn(() => {
-          const sortedRoutes = getSortedRoutes([
+          const sortedRoutes = sortPages([
             ...pageKeys.pages,
             ...(pageKeys.app ?? []),
           ])
-          const dynamicRoutes: Array<ReturnType<typeof pageToRoute>> = []
-          const staticRoutes: typeof dynamicRoutes = []
+          const staticRoutes: Array<ManifestRoute> = []
 
           for (const route of sortedRoutes) {
             if (isDynamicRoute(route)) {
-              dynamicRoutes.push(pageToRoute(route))
+              dynamicRoutes.push(
+                pageToRoute(
+                  route,
+                  // This property is only relevant when PPR is enabled.
+                  undefined
+                )
+              )
             } else if (!isReservedPage(route)) {
               staticRoutes.push(pageToRoute(route))
             }
@@ -1220,6 +1402,17 @@ export default async function build(
               buildCustomRoute('redirect', r, restrictedRedirectPaths)
             ),
             headers: headers.map((r) => buildCustomRoute('header', r)),
+            rewrites: {
+              beforeFiles: rewrites.beforeFiles.map((r) =>
+                buildCustomRoute('rewrite', r)
+              ),
+              afterFiles: rewrites.afterFiles.map((r) =>
+                buildCustomRoute('rewrite', r)
+              ),
+              fallback: rewrites.fallback.map((r) =>
+                buildCustomRoute('rewrite', r)
+              ),
+            },
             dynamicRoutes,
             staticRoutes,
             dataRoutes: [],
@@ -1228,12 +1421,19 @@ export default async function build(
               header: RSC_HEADER,
               // This vary header is used as a default. It is technically re-assigned in `base-server`,
               // and may include an additional Vary option for `Next-URL`.
-              varyHeader: `${RSC_HEADER}, ${NEXT_ROUTER_STATE_TREE_HEADER}, ${NEXT_ROUTER_PREFETCH_HEADER}`,
+              varyHeader: `${RSC_HEADER}, ${NEXT_ROUTER_STATE_TREE_HEADER}, ${NEXT_ROUTER_PREFETCH_HEADER}, ${NEXT_ROUTER_SEGMENT_PREFETCH_HEADER}`,
               prefetchHeader: NEXT_ROUTER_PREFETCH_HEADER,
               didPostponeHeader: NEXT_DID_POSTPONE_HEADER,
               contentTypeHeader: RSC_CONTENT_TYPE_HEADER,
               suffix: RSC_SUFFIX,
               prefetchSuffix: RSC_PREFETCH_SUFFIX,
+              prefetchSegmentHeader: NEXT_ROUTER_SEGMENT_PREFETCH_HEADER,
+              prefetchSegmentSuffix: RSC_SEGMENT_SUFFIX,
+              prefetchSegmentDirSuffix: RSC_SEGMENTS_DIR_SUFFIX,
+            },
+            rewriteHeaders: {
+              pathHeader: NEXT_REWRITTEN_PATH_HEADER,
+              queryHeader: NEXT_REWRITTEN_QUERY_HEADER,
             },
             skipMiddlewareUrlNormalize: config.skipMiddlewareUrlNormalize,
             ppr: isAppPPREnabled
@@ -1248,23 +1448,6 @@ export default async function build(
           } satisfies RoutesManifest
         })
 
-      if (rewrites.beforeFiles.length === 0 && rewrites.fallback.length === 0) {
-        routesManifest.rewrites = rewrites.afterFiles.map((r) =>
-          buildCustomRoute('rewrite', r)
-        )
-      } else {
-        routesManifest.rewrites = {
-          beforeFiles: rewrites.beforeFiles.map((r) =>
-            buildCustomRoute('rewrite', r)
-          ),
-          afterFiles: rewrites.afterFiles.map((r) =>
-            buildCustomRoute('rewrite', r)
-          ),
-          fallback: rewrites.fallback.map((r) =>
-            buildCustomRoute('rewrite', r)
-          ),
-        }
-      }
       let clientRouterFilters:
         | undefined
         | ReturnType<typeof createClientRouterFilter>
@@ -1273,28 +1456,8 @@ export default async function build(
         const nonInternalRedirects = (config._originalRedirects || []).filter(
           (r: any) => !r.internal
         )
-        const filterPaths: string[] = []
-
-        if (isFullFlyingShuttle) {
-          filterPaths.push(
-            ...[
-              // client filter always has all app paths
-              ...(changedAppPathsResult?.unchanged?.app || []),
-              ...(changedAppPathsResult?.changed?.app || []),
-            ].map((entry) =>
-              normalizeAppPath(getPageFromPath(entry, config.pageExtensions))
-            ),
-            ...(changedPagePathsResult?.unchanged.pages.length
-              ? changedPagePathsResult.changed?.pages || []
-              : []
-            ).map((item) => getPageFromPath(item, config.pageExtensions))
-          )
-        } else {
-          filterPaths.push(...appPaths)
-        }
-
         clientRouterFilters = createClientRouterFilter(
-          filterPaths,
+          [...appPaths],
           config.experimental.clientRouterFilterRedirects
             ? nonInternalRedirects
             : [],
@@ -1323,267 +1486,6 @@ export default async function build(
         SERVER_DIRECTORY,
         PAGES_MANIFEST
       )
-
-      async function turbopackBuild(): Promise<{
-        duration: number
-        buildTraceContext: undefined
-        shutdownPromise: Promise<void>
-      }> {
-        if (!IS_TURBOPACK_BUILD) {
-          throw new Error("next build doesn't support turbopack yet")
-        }
-
-        await validateTurboNextConfig({
-          dir,
-          isDev: false,
-        })
-
-        const startTime = process.hrtime()
-        const bindings = await loadBindings(config?.experimental?.useWasmBinary)
-        const dev = false
-
-        // const supportedBrowsers = await getSupportedBrowsers(dir, dev)
-        const supportedBrowsers = [
-          'last 1 Chrome versions, last 1 Firefox versions, last 1 Safari versions, last 1 Edge versions',
-        ]
-
-        const project = await bindings.turbo.createProject(
-          {
-            projectPath: dir,
-            rootPath:
-              config.experimental?.turbo?.root ||
-              config.outputFileTracingRoot ||
-              dir,
-            nextConfig: config,
-            jsConfig: await getTurbopackJsConfig(dir, config),
-            watch: false,
-            dev,
-            env: process.env as Record<string, string>,
-            defineEnv: createDefineEnv({
-              isTurbopack: true,
-              clientRouterFilters,
-              config,
-              dev,
-              distDir,
-              fetchCacheKeyPrefix: config.experimental.fetchCacheKeyPrefix,
-              hasRewrites,
-              // Implemented separately in Turbopack, doesn't have to be passed here.
-              middlewareMatchers: undefined,
-            }),
-            buildId: NextBuildContext.buildId!,
-            encryptionKey: NextBuildContext.encryptionKey!,
-            previewProps: NextBuildContext.previewProps!,
-            browserslistQuery: supportedBrowsers.join(', '),
-          },
-          {
-            memoryLimit: config.experimental.turbo?.memoryLimit,
-          }
-        )
-
-        await fs.mkdir(path.join(distDir, 'server'), { recursive: true })
-        await fs.mkdir(path.join(distDir, 'static', buildId), {
-          recursive: true,
-        })
-        await fs.writeFile(
-          path.join(distDir, 'package.json'),
-          JSON.stringify(
-            {
-              type: 'commonjs',
-            },
-            null,
-            2
-          )
-        )
-
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const entrypointsSubscription = project.entrypointsSubscribe()
-        const currentEntrypoints: Entrypoints = {
-          global: {
-            app: undefined,
-            document: undefined,
-            error: undefined,
-
-            middleware: undefined,
-            instrumentation: undefined,
-          },
-
-          app: new Map(),
-          page: new Map(),
-        }
-
-        const currentEntryIssues: EntryIssuesMap = new Map()
-
-        const manifestLoader = new TurbopackManifestLoader({
-          buildId,
-          distDir,
-          encryptionKey,
-        })
-
-        const entrypointsResult = await entrypointsSubscription.next()
-        if (entrypointsResult.done) {
-          throw new Error('Turbopack did not return any entrypoints')
-        }
-        entrypointsSubscription.return?.().catch(() => {})
-
-        const entrypoints = entrypointsResult.value
-
-        const topLevelErrors: {
-          message: string
-        }[] = []
-        for (const issue of entrypoints.issues) {
-          topLevelErrors.push({
-            message: formatIssue(issue),
-          })
-        }
-
-        if (topLevelErrors.length > 0) {
-          throw new Error(
-            `Turbopack build failed with ${
-              topLevelErrors.length
-            } issues:\n${topLevelErrors.map((e) => e.message).join('\n')}`
-          )
-        }
-
-        await handleEntrypoints({
-          entrypoints,
-          currentEntrypoints,
-          currentEntryIssues,
-          manifestLoader,
-          devRewrites: undefined,
-          productionRewrites: customRoutes.rewrites,
-          logErrors: false,
-        })
-
-        const progress = createProgress(
-          currentEntrypoints.page.size + currentEntrypoints.app.size + 1,
-          'Building'
-        )
-        const promises: Promise<any>[] = []
-        const sema = new Sema(10)
-        const enqueue = (fn: () => Promise<void>) => {
-          promises.push(
-            (async () => {
-              await sema.acquire()
-              try {
-                await fn()
-              } finally {
-                sema.release()
-                progress()
-              }
-            })()
-          )
-        }
-
-        if (!appDirOnly) {
-          for (const [page, route] of currentEntrypoints.page) {
-            enqueue(() =>
-              handleRouteType({
-                dev,
-                page,
-                pathname: page,
-                route,
-
-                currentEntryIssues,
-                entrypoints: currentEntrypoints,
-                manifestLoader,
-                devRewrites: undefined,
-                productionRewrites: customRoutes.rewrites,
-                logErrors: false,
-              })
-            )
-          }
-        }
-
-        for (const [page, route] of currentEntrypoints.app) {
-          enqueue(() =>
-            handleRouteType({
-              page,
-              dev: false,
-              pathname: normalizeAppPath(page),
-              route,
-              currentEntryIssues,
-              entrypoints: currentEntrypoints,
-              manifestLoader,
-              devRewrites: undefined,
-              productionRewrites: customRoutes.rewrites,
-              logErrors: false,
-            })
-          )
-        }
-
-        enqueue(() =>
-          handlePagesErrorRoute({
-            dev: false,
-            currentEntryIssues,
-            entrypoints: currentEntrypoints,
-            manifestLoader,
-            devRewrites: undefined,
-            productionRewrites: customRoutes.rewrites,
-            logErrors: false,
-          })
-        )
-        await Promise.all(promises)
-
-        await manifestLoader.writeManifests({
-          devRewrites: undefined,
-          productionRewrites: customRoutes.rewrites,
-          entrypoints: currentEntrypoints,
-        })
-
-        const errors: {
-          page: string
-          message: string
-        }[] = []
-        const warnings: {
-          page: string
-          message: string
-        }[] = []
-        for (const [page, entryIssues] of currentEntryIssues) {
-          for (const issue of entryIssues.values()) {
-            if (issue.severity !== 'warning') {
-              errors.push({
-                page,
-                message: formatIssue(issue),
-              })
-            } else {
-              if (isRelevantWarning(issue)) {
-                warnings.push({
-                  page,
-                  message: formatIssue(issue),
-                })
-              }
-            }
-          }
-        }
-
-        const shutdownPromise = project.shutdown()
-
-        if (warnings.length > 0) {
-          Log.warn(
-            `Turbopack build collected ${warnings.length} warnings:\n${warnings
-              .map((e) => {
-                return 'Page: ' + e.page + '\n' + e.message
-              })
-              .join('\n')}`
-          )
-        }
-
-        if (errors.length > 0) {
-          throw new Error(
-            `Turbopack build failed with ${errors.length} errors:\n${errors
-              .map((e) => {
-                return 'Page: ' + e.page + '\n' + e.message
-              })
-              .join('\n')}`
-          )
-        }
-
-        return {
-          duration: process.hrtime(startTime)[0],
-          buildTraceContext: undefined,
-          shutdownPromise,
-        }
-      }
 
       let buildTraceContext: undefined | BuildTraceContext
       let buildTracesPromise: Promise<any> | undefined = undefined
@@ -1628,22 +1530,27 @@ export default async function build(
 
       let shutdownPromise = Promise.resolve()
       if (!isGenerateMode) {
-        if (turboNextBuild) {
+        if (isTurbopack) {
           const {
             duration: compilerDuration,
             shutdownPromise: p,
             ...rest
-          } = await turbopackBuild()
+          } = await turbopackBuild(
+            process.env.NEXT_TURBOPACK_USE_WORKER === undefined ||
+              process.env.NEXT_TURBOPACK_USE_WORKER !== '0'
+          )
           shutdownPromise = p
           traceMemoryUsage('Finished build', nextBuildSpan)
 
           buildTraceContext = rest.buildTraceContext
 
-          Log.event('Compiled successfully')
+          const durationString = durationToString(compilerDuration)
+          Log.event(`Compiled successfully in ${durationString}`)
 
           telemetry.record(
             eventBuildCompleted(pagesPaths, {
-              durationInSeconds: compilerDuration,
+              bundler: 'turbopack',
+              durationInSeconds: Math.round(compilerDuration),
               totalAppPagesCount,
             })
           )
@@ -1669,6 +1576,8 @@ export default async function build(
                 const buildTraceWorker = new Worker(
                   require.resolve('./collect-build-traces'),
                   {
+                    debuggerPortOffset: -1,
+                    isolatedMemory: false,
                     numWorkers: 1,
                     exposedMethods: ['collectBuildTraces'],
                   }
@@ -1685,7 +1594,7 @@ export default async function build(
                     hasSsrAmpPages: false,
                     buildTraceContext,
                     outputFileTracingRoot,
-                    isFlyingShuttle: Boolean(flyingShuttle),
+                    isTurbopack: false,
                   })
                   .catch((err) => {
                     console.error(err)
@@ -1726,10 +1635,12 @@ export default async function build(
               traceMemoryUsage('Finished client compilation', nextBuildSpan)
             })
 
-            Log.event('Compiled successfully')
+            const durationString = durationToString(durationInSeconds)
+            Log.event(`Compiled successfully in ${durationString}`)
 
             telemetry.record(
               eventBuildCompleted(pagesPaths, {
+                bundler: getBundlerForTelemetry(isTurbopack),
                 durationInSeconds,
                 totalAppPagesCount,
               })
@@ -1745,12 +1656,22 @@ export default async function build(
 
             telemetry.record(
               eventBuildCompleted(pagesPaths, {
+                bundler: getBundlerForTelemetry(isTurbopack),
                 durationInSeconds: compilerDuration,
                 totalAppPagesCount,
               })
             )
           }
         }
+        await runAfterProductionCompile({
+          config,
+          buildSpan: nextBuildSpan,
+          telemetry,
+          metadata: {
+            projectDir: dir,
+            distDir,
+          },
+        })
       }
 
       // For app directory, we run type checking after build.
@@ -1763,26 +1684,6 @@ export default async function build(
       }
 
       const postCompileSpinner = createSpinner('Collecting page data')
-
-      if (isFullFlyingShuttle) {
-        // we need to copy the chunks from the shuttle folder
-        // to the distDir (we copy all server split chunks currently)
-        // this has to come before we require any page chunks as webpack
-        // cache could reference previous runtimes/chunks
-        if (await fileExists(path.join(shuttleDir, 'server'))) {
-          await recursiveCopy(
-            path.join(shuttleDir, 'server'),
-            path.join(distDir, 'server'),
-            {
-              filter(item) {
-                // we copy page chunks separately to not copy stale entries
-                return !item.match(/^[/\\](pages|app)[/\\]/)
-              },
-              overwrite: true,
-            }
-          )
-        }
-      }
 
       const buildManifestPath = path.join(distDir, BUILD_MANIFEST)
       const appBuildManifestPath = path.join(distDir, APP_BUILD_MANIFEST)
@@ -1802,7 +1703,7 @@ export default async function build(
       const staticPaths = new Map<string, PrerenderedRoute[]>()
       const appNormalizedPaths = new Map<string, string>()
       const fallbackModes = new Map<string, FallbackMode>()
-      const appDefaultConfigs = new Map<string, AppConfig>()
+      const appDefaultConfigs = new Map<string, AppSegmentConfig>()
       const pageInfos: PageInfos = new Map<string, PageInfo>()
       let pagesManifest = await readManifest<PagesManifest>(pagesManifestPath)
       const buildManifest = await readManifest<BuildManifest>(buildManifestPath)
@@ -1829,7 +1730,7 @@ export default async function build(
 
       process.env.NEXT_PHASE = PHASE_PRODUCTION_BUILD
 
-      const worker = createStaticWorker(config)
+      const worker = createStaticWorker(config, { debuggerPortOffset: -1 })
 
       const analysisBegin = process.hrtime()
       const staticCheckSpan = nextBuildSpan.traceChild('static-check')
@@ -1859,6 +1760,7 @@ export default async function build(
         const { configFileName, publicRuntimeConfig, serverRuntimeConfig } =
           config
         const runtimeEnvConfig = { publicRuntimeConfig, serverRuntimeConfig }
+        const sriEnabled = Boolean(config.experimental.sri?.algorithm)
 
         const nonStaticErrorPageSpan = staticCheckSpan.traceChild(
           'check-static-error-page'
@@ -1872,6 +1774,7 @@ export default async function build(
                 distDir,
                 runtimeEnvConfig,
                 checkingApp: false,
+                sriEnabled,
               }))
           )
 
@@ -1884,12 +1787,16 @@ export default async function build(
               distDir,
               configFileName,
               runtimeEnvConfig,
+              cacheComponents: isAppCacheComponentsEnabled,
+              authInterrupts: isAuthInterruptsEnabled,
               httpAgentOptions: config.httpAgentOptions,
               locales: config.i18n?.locales,
               defaultLocale: config.i18n?.defaultLocale,
               nextConfigOutput: config.output,
               pprConfig: config.experimental.ppr,
-              isAppPPRFallbacksEnabled: config.experimental.pprFallbacks,
+              cacheLifeProfiles: config.experimental.cacheLife,
+              buildId,
+              sriEnabled,
             })
         )
 
@@ -1901,6 +1808,7 @@ export default async function build(
             distDir,
             runtimeEnvConfig,
             checkingApp: true,
+            sriEnabled,
           }
         )
 
@@ -1908,6 +1816,7 @@ export default async function build(
           page: appPageToCheck,
           distDir,
           runtimeEnvConfig,
+          sriEnabled,
         })
 
         // eslint-disable-next-line @typescript-eslint/no-shadow
@@ -2025,7 +1934,7 @@ export default async function build(
 
                 const pageFilePath = isAppBuiltinNotFoundPage(pagePath)
                   ? require.resolve(
-                      'next/dist/client/components/not-found-error'
+                      'next/dist/client/components/builtin/not-found'
                     )
                   : path.join(
                       (pageType === 'pages' ? pagesDir : appDir) || '',
@@ -2048,9 +1957,27 @@ export default async function build(
                     })
                   : undefined
 
-                if (staticInfo?.extraConfig) {
-                  functionsConfigManifest.functions[page] =
-                    staticInfo.extraConfig
+                if (staticInfo?.hadUnsupportedValue) {
+                  errorFromUnsupportedSegmentConfig()
+                }
+
+                // If there's any thing that would contribute to the functions
+                // configuration, we need to add it to the manifest.
+                if (
+                  typeof staticInfo?.runtime !== 'undefined' ||
+                  typeof staticInfo?.maxDuration !== 'undefined' ||
+                  typeof staticInfo?.preferredRegion !== 'undefined'
+                ) {
+                  const regions = staticInfo?.preferredRegion
+                    ? typeof staticInfo.preferredRegion === 'string'
+                      ? [staticInfo.preferredRegion]
+                      : staticInfo.preferredRegion
+                    : undefined
+
+                  functionsConfigManifest.functions[page] = {
+                    maxDuration: staticInfo?.maxDuration,
+                    ...(regions && { regions }),
+                  }
                 }
 
                 const pageRuntime = middlewareManifest.functions[
@@ -2099,15 +2026,19 @@ export default async function build(
                             pageRuntime,
                             edgeInfo,
                             pageType,
+                            cacheComponents: isAppCacheComponentsEnabled,
+                            authInterrupts: isAuthInterruptsEnabled,
                             cacheHandler: config.cacheHandler,
+                            cacheHandlers: config.experimental.cacheHandlers,
                             isrFlushToDisk: ciEnvironment.hasNextSupport
                               ? false
                               : config.experimental.isrFlushToDisk,
                             maxMemoryCacheSize: config.cacheMaxMemorySize,
                             nextConfigOutput: config.output,
                             pprConfig: config.experimental.ppr,
-                            isAppPPRFallbacksEnabled:
-                              config.experimental.pprFallbacks,
+                            cacheLifeProfiles: config.experimental.cacheLife,
+                            buildId,
+                            sriEnabled,
                           })
                         }
                       )
@@ -2123,34 +2054,37 @@ export default async function build(
                             `Using edge runtime on a page currently disables static generation for that page`
                           )
                         } else {
+                          const isDynamic = isDynamicRoute(page)
+
+                          if (
+                            typeof workerResult.isRoutePPREnabled === 'boolean'
+                          ) {
+                            isRoutePPREnabled = workerResult.isRoutePPREnabled
+                          }
+
                           // If this route can be partially pre-rendered, then
                           // mark it as such and mark that it can be
                           // generated server-side.
                           if (workerResult.isRoutePPREnabled) {
-                            isRoutePPREnabled = workerResult.isRoutePPREnabled
                             isSSG = true
                             isStatic = true
 
                             staticPaths.set(originalAppPath, [])
                           }
 
-                          if (
-                            workerResult.prerenderedRoutes &&
-                            workerResult.prerenderedRoutes.length > 0
-                          ) {
+                          if (workerResult.prerenderedRoutes) {
                             staticPaths.set(
                               originalAppPath,
                               workerResult.prerenderedRoutes
                             )
                             ssgPageRoutes = workerResult.prerenderedRoutes.map(
-                              (route) => route.path
+                              (route) => route.pathname
                             )
                             isSSG = true
                           }
 
                           const appConfig = workerResult.appConfig || {}
                           if (appConfig.revalidate !== 0) {
-                            const isDynamic = isDynamicRoute(page)
                             const hasGenerateStaticParams =
                               workerResult.prerenderedRoutes &&
                               workerResult.prerenderedRoutes.length > 0
@@ -2172,9 +2106,14 @@ export default async function build(
                             if (!isDynamic) {
                               staticPaths.set(originalAppPath, [
                                 {
-                                  path: page,
-                                  encoded: page,
+                                  params: {},
+                                  pathname: page,
+                                  encodedPathname: page,
                                   fallbackRouteParams: [],
+                                  fallbackMode:
+                                    workerResult.prerenderFallbackMode,
+                                  fallbackRootParams: [],
+                                  throwOnEmptyStaticShell: true,
                                 },
                               ])
                               isStatic = true
@@ -2205,8 +2144,6 @@ export default async function build(
                               `"getStaticProps" is not yet supported fully with "experimental-edge", detected on ${page}`
                             )
                           }
-                          // TODO: add handling for statically rendering edge
-                          // pages and allow edge with Prerender outputs
                           workerResult.isStatic = false
                           workerResult.hasStaticProps = false
                         }
@@ -2240,7 +2177,7 @@ export default async function build(
                               workerResult.prerenderedRoutes
                             )
                             ssgPageRoutes = workerResult.prerenderedRoutes.map(
-                              (route) => route.path
+                              (route) => route.pathname
                             )
                           }
 
@@ -2320,6 +2257,7 @@ export default async function build(
                 }
 
                 pageInfos.set(page, {
+                  originalAppPath,
                   size,
                   totalSize,
                   isStatic,
@@ -2327,22 +2265,15 @@ export default async function build(
                   isRoutePPREnabled,
                   isHybridAmp,
                   ssgPageRoutes,
-                  initialRevalidateSeconds: false,
+                  initialCacheControl: undefined,
                   runtime: pageRuntime,
                   pageDuration: undefined,
                   ssgPageDurations: undefined,
-                  hasEmptyPrelude: undefined,
+                  hasEmptyStaticShell: undefined,
                 })
               })
             })
         )
-
-        if (hadUnsupportedValue) {
-          Log.error(
-            `Invalid config value exports detected, these can cause unexpected behavior from the configs not being applied. Please fix them to continue`
-          )
-          process.exit(1)
-        }
 
         const errorPageResult = await errorPageStaticResult
         const nonStaticErrorPage =
@@ -2383,7 +2314,8 @@ export default async function build(
           path.join(SERVER_DIRECTORY, `${INSTRUMENTATION_HOOK_FILENAME}.js`)
         )
         // If there's edge routes, append the edge instrumentation hook
-        if (edgeRuntimeAppCount || edgeRuntimePagesCount) {
+        // Turbopack generates this chunk with a hashed name and references it in middleware-manifest.
+        if (!isTurbopack && (edgeRuntimeAppCount || edgeRuntimePagesCount)) {
           instrumentationHookEntryFiles.push(
             path.join(
               SERVER_DIRECTORY,
@@ -2396,6 +2328,16 @@ export default async function build(
       const requiredServerFilesManifest = nextBuildSpan
         .traceChild('generate-required-server-files')
         .traceFn(() => {
+          const normalizedCacheHandlers: Record<string, string> = {}
+
+          for (const [key, value] of Object.entries(
+            config.experimental.cacheHandlers || {}
+          )) {
+            if (key && value) {
+              normalizedCacheHandlers[key] = path.relative(distDir, value)
+            }
+          }
+
           const serverFilesManifest: RequiredServerFilesManifest = {
             version: 1,
             config: {
@@ -2411,9 +2353,8 @@ export default async function build(
                 : config.cacheHandler,
               experimental: {
                 ...config.experimental,
+                cacheHandlers: normalizedCacheHandlers,
                 trustHostHeader: ciEnvironment.hasNextSupport,
-
-                // @ts-expect-error internal field TODO: fix this, should use a separate mechanism to pass the info.
                 isExperimentalCompile: isCompileMode,
               },
             },
@@ -2424,12 +2365,18 @@ export default async function build(
               path.relative(distDir, pagesManifestPath),
               BUILD_MANIFEST,
               PRERENDER_MANIFEST,
+              path.join(SERVER_DIRECTORY, FUNCTIONS_CONFIG_MANIFEST),
               path.join(SERVER_DIRECTORY, MIDDLEWARE_MANIFEST),
               path.join(SERVER_DIRECTORY, MIDDLEWARE_BUILD_MANIFEST + '.js'),
-              path.join(
-                SERVER_DIRECTORY,
-                MIDDLEWARE_REACT_LOADABLE_MANIFEST + '.js'
-              ),
+              ...(!isTurbopack
+                ? [
+                    path.join(
+                      SERVER_DIRECTORY,
+                      MIDDLEWARE_REACT_LOADABLE_MANIFEST + '.js'
+                    ),
+                    REACT_LOADABLE_MANIFEST,
+                  ]
+                : []),
               ...(appDir
                 ? [
                     ...(config.experimental.sri
@@ -2457,10 +2404,16 @@ export default async function build(
                     ),
                   ]
                 : []),
-              REACT_LOADABLE_MANIFEST,
+              ...(pagesDir && !isTurbopack
+                ? [
+                    DYNAMIC_CSS_MANIFEST + '.json',
+                    path.join(SERVER_DIRECTORY, DYNAMIC_CSS_MANIFEST + '.js'),
+                  ]
+                : []),
               BUILD_ID_FILE,
               path.join(SERVER_DIRECTORY, NEXT_FONT_MANIFEST + '.js'),
               path.join(SERVER_DIRECTORY, NEXT_FONT_MANIFEST + '.json'),
+              SERVER_FILES_MANIFEST,
               ...instrumentationHookEntryFiles,
             ]
               .filter(nonNullable)
@@ -2487,6 +2440,52 @@ export default async function build(
         )
       }
 
+      const middlewareFile = rootPaths.find((p) =>
+        p.includes(MIDDLEWARE_FILENAME)
+      )
+      let hasNodeMiddleware = false
+
+      if (middlewareFile) {
+        const staticInfo = await getStaticInfoIncludingLayouts({
+          isInsideAppDir: false,
+          pageFilePath: path.join(dir, middlewareFile),
+          config,
+          appDir,
+          pageExtensions: config.pageExtensions,
+          isDev: false,
+          page: 'middleware',
+        })
+
+        if (staticInfo.hadUnsupportedValue) {
+          errorFromUnsupportedSegmentConfig()
+        }
+
+        if (staticInfo.runtime === 'nodejs') {
+          hasNodeMiddleware = true
+          functionsConfigManifest.functions['/_middleware'] = {
+            runtime: staticInfo.runtime,
+            matchers: staticInfo.middleware?.matchers ?? [
+              {
+                regexp: '^.*$',
+                originalSource: '/:path*',
+              },
+            ],
+          }
+
+          if (isTurbopack) {
+            await writeManifest(
+              path.join(
+                distDir,
+                'static',
+                buildId,
+                TURBOPACK_CLIENT_MIDDLEWARE_MANIFEST
+              ),
+              functionsConfigManifest.functions['/_middleware'].matchers || []
+            )
+          }
+        }
+      }
+
       await writeFunctionsConfigManifest(distDir, functionsConfigManifest)
 
       if (!isGenerateMode && !buildTracesPromise) {
@@ -2500,7 +2499,7 @@ export default async function build(
           hasSsrAmpPages,
           buildTraceContext,
           outputFileTracingRoot,
-          isFlyingShuttle: Boolean(flyingShuttle),
+          isTurbopack: true,
         }).catch((err) => {
           console.error(err)
           process.exit(1)
@@ -2510,14 +2509,12 @@ export default async function build(
       if (serverPropsPages.size > 0 || ssgPages.size > 0) {
         // We update the routes manifest after the build with the
         // data routes since we can't determine these until after build
-        routesManifest.dataRoutes = getSortedRoutes([
+        routesManifest.dataRoutes = sortPages([
           ...serverPropsPages,
           ...ssgPages,
         ]).map((page) => {
           return buildDataRoute(page, buildId)
         })
-
-        // await writeManifest(routesManifestPath, routesManifest)
       }
 
       // We need to write the manifest with rewrites before build
@@ -2572,6 +2569,10 @@ export default async function build(
 
       const features: EventBuildFeatureUsage[] = [
         {
+          featureName: 'experimental/cacheComponents',
+          invocationCount: config.experimental.cacheComponents ? 1 : 0,
+        },
+        {
           featureName: 'experimental/optimizeCss',
           invocationCount: config.experimental.optimizeCss ? 1 : 0,
         },
@@ -2582,6 +2583,10 @@ export default async function build(
         {
           featureName: 'experimental/ppr',
           invocationCount: config.experimental.ppr ? 1 : 0,
+        },
+        {
+          featureName: 'turbopackPersistentCaching',
+          invocationCount: isPersistentCachingEnabled(config) ? 1 : 0,
         },
       ]
       telemetry.record(
@@ -2598,79 +2603,24 @@ export default async function build(
         requiredServerFilesManifest
       )
 
+      // we don't need to inline for turbopack build as
+      // it will handle it's own caching separate of compile
+      if (isGenerateMode && !isTurbopack) {
+        Log.info('Inlining static env ...')
+
+        await nextBuildSpan
+          .traceChild('inline-static-env')
+          .traceAsyncFn(async () => {
+            await inlineStaticEnv({
+              distDir,
+              config,
+            })
+          })
+      }
+
       const middlewareManifest: MiddlewareManifest = await readManifest(
         path.join(distDir, SERVER_DIRECTORY, MIDDLEWARE_MANIFEST)
       )
-
-      if (!isGenerateMode) {
-        if (flyingShuttle) {
-          await buildTracesPromise
-
-          if (isStoreOnlyFlyingShuttle) {
-            console.log('skipping stitching builds due to store-only mode')
-          } else {
-            console.log('stitching builds...')
-            await nextBuildSpan
-              .traceChild('stitch-incremental-builds')
-              .traceAsyncFn(async () => {
-                const stitchResult = await stitchBuilds(
-                  {
-                    config,
-                    buildId,
-                    distDir,
-                    shuttleDir,
-                    rewrites,
-                    redirects,
-                    edgePreviewProps: {
-                      __NEXT_PREVIEW_MODE_ID:
-                        NextBuildContext.previewProps!.previewModeId,
-                      __NEXT_PREVIEW_MODE_ENCRYPTION_KEY:
-                        NextBuildContext.previewProps!.previewModeEncryptionKey,
-                      __NEXT_PREVIEW_MODE_SIGNING_KEY:
-                        NextBuildContext.previewProps!.previewModeSigningKey,
-                    },
-                    encryptionKey,
-                    allowedErrorRate:
-                      config.experimental.clientRouterFilterAllowedRate,
-                  },
-                  {
-                    changed: {
-                      pages: changedPagePathsResult?.changed.pages || [],
-                      app: changedAppPathsResult?.changed.app || [],
-                    },
-                    unchanged: {
-                      pages: changedPagePathsResult?.unchanged.pages || [],
-                      app: changedAppPathsResult?.unchanged.app || [],
-                    },
-                    pageExtensions: config.pageExtensions,
-                  }
-                )
-                // reload pagesManifest since it's been updated on disk
-                if (stitchResult.pagesManifest) {
-                  pagesManifest = stitchResult.pagesManifest
-                }
-              })
-          }
-
-          console.log('storing shuttle')
-          await nextBuildSpan
-            .traceChild('store-cache-shuttle')
-            .traceAsyncFn(async () => {
-              await storeShuttle({
-                config,
-                distDir,
-                shuttleDir,
-              })
-            })
-
-          console.log('inlining static env')
-          await nextBuildSpan
-            .traceChild('inline-static-env')
-            .traceAsyncFn(async () => {
-              await inlineStaticEnv({ distDir })
-            })
-        }
-      }
 
       const prerenderManifest: PrerenderManifest = {
         version: 4,
@@ -2730,12 +2680,13 @@ export default async function build(
             new Map(
               Array.from(additionalPaths.entries()).map(
                 ([page, routes]): [string, string[]] => {
-                  return [page, routes.map((route) => route.path)]
+                  return [page, routes.map((route) => route.pathname)]
                 }
               )
             )
           )
-          const exportApp = require('../export')
+
+          const exportApp = (require('../export') as typeof import('../export'))
             .default as typeof import('../export').default
 
           const exportConfig: NextConfigComplete = {
@@ -2761,12 +2712,12 @@ export default async function build(
                     if (i18n) {
                       defaultMap[`/${i18n.defaultLocale}${page}`] = {
                         page,
-                        query: { __nextFallback: 'true' },
+                        _pagesFallback: true,
                       }
                     } else {
                       defaultMap[page] = {
                         page,
-                        query: { __nextFallback: 'true' },
+                        _pagesFallback: true,
                       }
                     }
                   } else {
@@ -2781,9 +2732,9 @@ export default async function build(
               // post slugs.
               additionalPaths.forEach((routes, page) => {
                 routes.forEach((route) => {
-                  defaultMap[route.path] = {
+                  defaultMap[route.pathname] = {
                     page,
-                    query: { __nextSsgPath: route.encoded },
+                    _ssgPath: route.encodedPathname,
                   }
                 })
               })
@@ -2806,18 +2757,29 @@ export default async function build(
                 const appConfig = appDefaultConfigs.get(originalAppPath)
                 const isDynamicError = appConfig?.dynamic === 'error'
 
-                const isRoutePPREnabled = appConfig
+                const isRoutePPREnabled: boolean = appConfig
                   ? checkIsRoutePPREnabled(config.experimental.ppr, appConfig)
-                  : undefined
+                  : false
 
                 routes.forEach((route) => {
-                  defaultMap[route.path] = {
+                  // If the route has any dynamic root segments, we need to skip
+                  // rendering the route. This is because we don't support
+                  // revalidating the shells without the parameters present.
+                  if (
+                    route.fallbackRootParams &&
+                    route.fallbackRootParams.length > 0
+                  ) {
+                    return
+                  }
+
+                  defaultMap[route.pathname] = {
                     page: originalAppPath,
-                    query: { __nextSsgPath: route.encoded },
+                    _ssgPath: route.encodedPathname,
                     _fallbackRouteParams: route.fallbackRouteParams,
                     _isDynamicError: isDynamicError,
                     _isAppDir: true,
                     _isRoutePPREnabled: isRoutePPREnabled,
+                    _allowEmptyStaticShell: !route.throwOnEmptyStaticShell,
                   }
                 })
               })
@@ -2840,10 +2802,8 @@ export default async function build(
 
                     defaultMap[outputPath] = {
                       page: defaultMap[page]?.page || page,
-                      query: {
-                        __nextLocale: locale,
-                        __nextFallback: isFallback ? 'true' : undefined,
-                      },
+                      _locale: locale,
+                      _pagesFallback: isFallback,
                     }
                   }
 
@@ -2858,26 +2818,76 @@ export default async function build(
             },
           }
 
-          const exportOptions: ExportAppOptions = {
-            nextConfig: exportConfig,
-            enabledDirectories,
-            silent: true,
-            buildExport: true,
-            debugOutput,
-            pages: combinedPages,
-            outdir: path.join(distDir, 'export'),
-            statusMessage: 'Generating static pages',
-            numWorkers: getNumberOfWorkers(exportConfig),
-          }
-
+          const outdir = path.join(distDir, 'export')
           const exportResult = await exportApp(
             dir,
-            exportOptions,
+            {
+              nextConfig: exportConfig,
+              enabledDirectories,
+              silent: true,
+              buildExport: true,
+              debugOutput,
+              debugPrerender,
+              pages: combinedPages,
+              outdir,
+              statusMessage: 'Generating static pages',
+              numWorkers: getNumberOfWorkers(exportConfig),
+            },
             nextBuildSpan
           )
 
           // If there was no result, there's nothing more to do.
           if (!exportResult) return
+
+          const getFallbackMode = (route: PrerenderedRoute) => {
+            const hasEmptyStaticShell = exportResult.byPath.get(
+              route.pathname
+            )?.hasEmptyStaticShell
+
+            // If the route has an empty static shell and is not configured to
+            // throw on empty static shell, then we should use the blocking
+            // static render mode.
+            if (
+              hasEmptyStaticShell &&
+              !route.throwOnEmptyStaticShell &&
+              route.fallbackMode === FallbackMode.PRERENDER
+            ) {
+              return FallbackMode.BLOCKING_STATIC_RENDER
+            }
+
+            // If the route has no fallback mode, then we should use the
+            // `NOT_FOUND` fallback mode.
+            if (!route.fallbackMode) {
+              return FallbackMode.NOT_FOUND
+            }
+
+            return route.fallbackMode
+          }
+
+          const getCacheControl = (
+            exportPath: string,
+            defaultRevalidate: Revalidate = false
+          ): CacheControl => {
+            const cacheControl =
+              exportResult.byPath.get(exportPath)?.cacheControl
+
+            if (!cacheControl) {
+              return { revalidate: defaultRevalidate, expire: undefined }
+            }
+
+            if (
+              cacheControl.revalidate !== false &&
+              cacheControl.revalidate > 0 &&
+              cacheControl.expire === undefined
+            ) {
+              return {
+                revalidate: cacheControl.revalidate,
+                expire: config.expireTime,
+              }
+            }
+
+            return cacheControl
+          }
 
           if (debugOutput || process.env.NEXT_SSG_FETCH_METRICS === '1') {
             recordFetchMetrics(exportResult)
@@ -2902,12 +2912,15 @@ export default async function build(
           }
 
           staticPaths.forEach((prerenderedRoutes, originalAppPath) => {
-            const page = appNormalizedPaths.get(originalAppPath) || ''
-            const appConfig = appDefaultConfigs.get(originalAppPath) || {}
+            const page = appNormalizedPaths.get(originalAppPath)
+            if (!page) throw new InvariantError('Page not found')
+
+            const appConfig = appDefaultConfigs.get(originalAppPath)
+            if (!appConfig) throw new InvariantError('App config not found')
 
             let hasRevalidateZero =
               appConfig.revalidate === 0 ||
-              exportResult.byPath.get(page)?.revalidate === 0
+              getCacheControl(page).revalidate === 0
 
             if (hasRevalidateZero && pageInfos.get(page)?.isStatic) {
               // if the page was marked as being static, but it contains dynamic data
@@ -2929,6 +2942,10 @@ export default async function build(
                 ? true
                 : undefined
 
+            const htmlBotsRegexString =
+              // The htmlLimitedBots has been converted to a string during loadConfig
+              config.htmlLimitedBots || HTML_LIMITED_BOT_UA_RE_STRING
+
             // this flag is used to selectively bypass the static cache and invoke the lambda directly
             // to enable server actions on static routes
             const bypassFor: RouteHas[] = [
@@ -2938,6 +2955,17 @@ export default async function build(
                 key: 'content-type',
                 value: 'multipart/form-data;.*',
               },
+              // If it's PPR rendered non-static page, bypass the PPR cache when streaming metadata is enabled.
+              // This will skip the postpone data for those bots requests and instead produce a dynamic render.
+              ...(isRoutePPREnabled
+                ? [
+                    {
+                      type: 'header',
+                      key: 'user-agent',
+                      value: htmlBotsRegexString,
+                    },
+                  ]
+                : []),
             ]
 
             // We should collect all the dynamic routes into a single array for
@@ -2945,45 +2973,45 @@ export default async function build(
             // route), any routes that were generated with unknown route params
             // should be collected and included in the dynamic routes part
             // of the manifest instead.
-            const routes: string[] = []
-            const dynamicRoutes: string[] = []
+            const staticPrerenderedRoutes: PrerenderedRoute[] = []
+            const dynamicPrerenderedRoutes: PrerenderedRoute[] = []
 
             // Sort the outputted routes to ensure consistent output. Any route
             // though that has unknown route params will be pulled and sorted
             // independently. This is because the routes with unknown route
             // params will contain the dynamic path parameters, some of which
             // may conflict with the actual prerendered routes.
-            let unknownPrerenderRoutes: PrerenderedRoute[] = []
-            let knownPrerenderRoutes: PrerenderedRoute[] = []
+            const unsortedUnknownPrerenderRoutes: PrerenderedRoute[] = []
+            const unsortedKnownPrerenderRoutes: PrerenderedRoute[] = []
             for (const prerenderedRoute of prerenderedRoutes) {
               if (
                 prerenderedRoute.fallbackRouteParams &&
                 prerenderedRoute.fallbackRouteParams.length > 0
               ) {
-                unknownPrerenderRoutes.push(prerenderedRoute)
+                unsortedUnknownPrerenderRoutes.push(prerenderedRoute)
               } else {
-                knownPrerenderRoutes.push(prerenderedRoute)
+                unsortedKnownPrerenderRoutes.push(prerenderedRoute)
               }
             }
 
-            unknownPrerenderRoutes = getSortedRouteObjects(
-              unknownPrerenderRoutes,
-              (prerenderedRoute) => prerenderedRoute.path
+            const sortedUnknownPrerenderRoutes = sortPageObjects(
+              unsortedUnknownPrerenderRoutes,
+              (prerenderedRoute) => prerenderedRoute.pathname
             )
-            knownPrerenderRoutes = getSortedRouteObjects(
-              knownPrerenderRoutes,
-              (prerenderedRoute) => prerenderedRoute.path
+            const sortedKnownPrerenderRoutes = sortPageObjects(
+              unsortedKnownPrerenderRoutes,
+              (prerenderedRoute) => prerenderedRoute.pathname
             )
 
             prerenderedRoutes = [
-              ...knownPrerenderRoutes,
-              ...unknownPrerenderRoutes,
+              ...sortedKnownPrerenderRoutes,
+              ...sortedUnknownPrerenderRoutes,
             ]
 
             for (const prerenderedRoute of prerenderedRoutes) {
               // TODO: check if still needed?
               // Exclude the /_not-found route.
-              if (prerenderedRoute.path === UNDERSCORE_NOT_FOUND_ROUTE) {
+              if (prerenderedRoute.pathname === UNDERSCORE_NOT_FOUND_ROUTE) {
                 continue
               }
 
@@ -2994,41 +3022,47 @@ export default async function build(
               ) {
                 // If the route has unknown params, then we need to add it to
                 // the list of dynamic routes.
-                dynamicRoutes.push(prerenderedRoute.path)
+                dynamicPrerenderedRoutes.push(prerenderedRoute)
               } else {
                 // If the route doesn't have unknown params, then we need to
-                // add it to the list of routes.
-                routes.push(prerenderedRoute.path)
+                // add it to the list of static routes.
+                staticPrerenderedRoutes.push(prerenderedRoute)
               }
             }
 
             // Handle all the static routes.
-            for (const route of routes) {
-              if (isDynamicRoute(page) && route === page) continue
-              if (route === UNDERSCORE_NOT_FOUND_ROUTE) continue
+            for (const route of staticPrerenderedRoutes) {
+              if (isDynamicRoute(page) && route.pathname === page) continue
+              if (route.pathname === UNDERSCORE_NOT_FOUND_ROUTE) continue
 
               const {
-                revalidate = appConfig.revalidate ?? false,
                 metadata = {},
-                hasEmptyPrelude,
+                hasEmptyStaticShell,
                 hasPostponed,
-              } = exportResult.byPath.get(route) ?? {}
+              } = exportResult.byPath.get(route.pathname) ?? {}
 
-              pageInfos.set(route, {
-                ...(pageInfos.get(route) as PageInfo),
+              const cacheControl = getCacheControl(
+                route.pathname,
+                appConfig.revalidate
+              )
+
+              pageInfos.set(route.pathname, {
+                ...(pageInfos.get(route.pathname) as PageInfo),
                 hasPostponed,
-                hasEmptyPrelude,
+                hasEmptyStaticShell,
+                initialCacheControl: cacheControl,
               })
 
               // update the page (eg /blog/[slug]) to also have the postpone metadata
               pageInfos.set(page, {
                 ...(pageInfos.get(page) as PageInfo),
                 hasPostponed,
-                hasEmptyPrelude,
+                hasEmptyStaticShell,
+                initialCacheControl: cacheControl,
               })
 
-              if (revalidate !== 0) {
-                const normalizedRoute = normalizePagePath(route)
+              if (cacheControl.revalidate !== 0) {
+                const normalizedRoute = normalizePagePath(route.pathname)
 
                 let dataRoute: string | null
                 if (isAppRouteHandler) {
@@ -3050,7 +3084,7 @@ export default async function build(
 
                 const meta = collectMeta(metadata)
 
-                prerenderManifest.routes[route] = {
+                prerenderManifest.routes[route.pathname] = {
                   initialStatus: meta.status,
                   initialHeaders: meta.headers,
                   renderingMode: isAppPPREnabled
@@ -3060,17 +3094,19 @@ export default async function build(
                     : undefined,
                   experimentalPPR: isRoutePPREnabled,
                   experimentalBypassFor: bypassFor,
-                  initialRevalidateSeconds: revalidate,
+                  initialRevalidateSeconds: cacheControl.revalidate,
+                  initialExpireSeconds: cacheControl.expire,
                   srcRoute: page,
                   dataRoute,
                   prefetchDataRoute,
+                  allowHeader: ALLOWED_HEADERS,
                 }
               } else {
                 hasRevalidateZero = true
                 // we might have determined during prerendering that this page
                 // used dynamic data
-                pageInfos.set(route, {
-                  ...(pageInfos.get(route) as PageInfo),
+                pageInfos.set(route.pathname, {
+                  ...(pageInfos.get(route.pathname) as PageInfo),
                   isSSG: false,
                   isStatic: false,
                 })
@@ -3081,15 +3117,28 @@ export default async function build(
               // When PPR fallbacks aren't used, we need to include it here. If
               // they are enabled, then it'll already be included in the
               // prerendered routes.
-              if (!isRoutePPREnabled || !config.experimental.pprFallbacks) {
-                dynamicRoutes.push(page)
+              if (!isRoutePPREnabled) {
+                dynamicPrerenderedRoutes.push({
+                  params: {},
+                  pathname: page,
+                  encodedPathname: page,
+                  fallbackRouteParams: [],
+                  fallbackMode:
+                    fallbackModes.get(originalAppPath) ??
+                    FallbackMode.NOT_FOUND,
+                  fallbackRootParams: [],
+                  throwOnEmptyStaticShell: true,
+                })
               }
 
-              for (const route of dynamicRoutes) {
-                const normalizedRoute = normalizePagePath(route)
+              for (const route of dynamicPrerenderedRoutes) {
+                const normalizedRoute = normalizePagePath(route.pathname)
 
-                const { metadata, revalidate } =
-                  exportResult.byPath.get(route) ?? {}
+                const metadata = exportResult.byPath.get(
+                  route.pathname
+                )?.metadata
+
+                const cacheControl = getCacheControl(route.pathname)
 
                 let dataRoute: string | null = null
                 if (!isAppRouteHandler) {
@@ -3097,34 +3146,100 @@ export default async function build(
                 }
 
                 let prefetchDataRoute: string | undefined
+                let dynamicRoute = routesManifest.dynamicRoutes.find(
+                  (r) => r.page === route.pathname
+                )
                 if (!isAppRouteHandler && isAppPPREnabled) {
                   prefetchDataRoute = path.posix.join(
                     `${normalizedRoute}${RSC_PREFETCH_SUFFIX}`
                   )
+
+                  // If the dynamic route wasn't found, then we need to create
+                  // it. This ensures that for each fallback shell there's an
+                  // entry in the app routes manifest which enables routing for
+                  // this fallback shell.
+                  if (!dynamicRoute) {
+                    dynamicRoute = pageToRoute(route.pathname, page)
+                    sourcePages.set(route.pathname, page)
+
+                    // This route is not for the internal router, but instead
+                    // for external routers.
+                    dynamicRoute.skipInternalRouting = true
+
+                    // Push this to the end of the array. The dynamic routes are
+                    // sorted by page later.
+                    dynamicRoutes.push(dynamicRoute)
+                  }
                 }
 
-                pageInfos.set(route, {
-                  ...(pageInfos.get(route) as PageInfo),
+                if (!isAppRouteHandler && metadata?.segmentPaths) {
+                  // If PPR isn't enabled, then we might not find the dynamic
+                  // route by pathname. If that's the case, we need to find the
+                  // route by page.
+                  if (!dynamicRoute) {
+                    dynamicRoute = dynamicRoutes.find((r) => r.page === page)
+
+                    // If it can't be found by page, we must throw an error.
+                    if (!dynamicRoute) {
+                      throw new InvariantError('Dynamic route not found')
+                    }
+                  }
+
+                  if (metadata.segmentPaths) {
+                    const pageSegmentPath = metadata.segmentPaths.find((item) =>
+                      item.endsWith('__PAGE__')
+                    )
+                    if (!pageSegmentPath) {
+                      throw new Error(`Invariant: missing __PAGE__ segmentPath`)
+                    }
+
+                    // We build a combined segment data route from the
+                    // page segment as we need to limit the number of
+                    // routes we output and they can be shared
+                    const builtSegmentDataRoute = buildPrefetchSegmentDataRoute(
+                      route.pathname,
+                      pageSegmentPath
+                    )
+
+                    builtSegmentDataRoute.source =
+                      builtSegmentDataRoute.source.replace(
+                        '/__PAGE__\\.segment\\.rsc$',
+                        `(?<segment>/__PAGE__\\.segment\\.rsc|\\.segment\\.rsc)(?:/)?$`
+                      )
+                    builtSegmentDataRoute.destination =
+                      builtSegmentDataRoute.destination.replace(
+                        '/__PAGE__.segment.rsc',
+                        '$segment'
+                      )
+                    dynamicRoute.prefetchSegmentDataRoutes ??= []
+                    dynamicRoute.prefetchSegmentDataRoutes.push(
+                      builtSegmentDataRoute
+                    )
+                  }
+                }
+
+                pageInfos.set(route.pathname, {
+                  ...(pageInfos.get(route.pathname) as PageInfo),
                   isDynamicAppRoute: true,
                   // if PPR is turned on and the route contains a dynamic segment,
                   // we assume it'll be partially prerendered
                   hasPostponed: isRoutePPREnabled,
                 })
 
-                const fallbackMode =
-                  fallbackModes.get(originalAppPath) ?? FallbackMode.NOT_FOUND
+                const fallbackMode = getFallbackMode(route)
 
-                // When we're configured to serve a prerender, we should use the
-                // fallback revalidate from the export result. If it can't be
-                // found, mark that we should keep the shell forever (`false`).
-                let fallbackRevalidate: Revalidate | undefined =
+                // When the route is configured to serve a prerender, we should
+                // use the cache control from the export result. If it can't be
+                // found, mark that we should keep the shell forever
+                // (revalidate: `false` via `getCacheControl()`).
+                const fallbackCacheControl =
                   isRoutePPREnabled && fallbackMode === FallbackMode.PRERENDER
-                    ? revalidate ?? false
+                    ? cacheControl
                     : undefined
 
                 const fallback: Fallback = fallbackModeToFallbackField(
                   fallbackMode,
-                  route
+                  route.pathname
                 )
 
                 const meta =
@@ -3134,7 +3249,7 @@ export default async function build(
                     ? collectMeta(metadata)
                     : {}
 
-                prerenderManifest.dynamicRoutes[route] = {
+                prerenderManifest.dynamicRoutes[route.pathname] = {
                   experimentalPPR: isRoutePPREnabled,
                   renderingMode: isAppPPREnabled
                     ? isRoutePPREnabled
@@ -3143,33 +3258,42 @@ export default async function build(
                     : undefined,
                   experimentalBypassFor: bypassFor,
                   routeRegex: normalizeRouteRegex(
-                    getNamedRouteRegex(route, false).re.source
+                    getNamedRouteRegex(route.pathname, {
+                      prefixRouteKeys: false,
+                    }).re.source
                   ),
                   dataRoute,
                   fallback,
-                  fallbackRevalidate,
+                  fallbackRevalidate: fallbackCacheControl?.revalidate,
+                  fallbackExpire: fallbackCacheControl?.expire,
                   fallbackStatus: meta.status,
                   fallbackHeaders: meta.headers,
+                  fallbackRootParams: fallback
+                    ? route.fallbackRootParams
+                    : undefined,
+                  fallbackSourceRoute: route.fallbackRouteParams?.length
+                    ? page
+                    : undefined,
                   dataRouteRegex: !dataRoute
                     ? null
                     : normalizeRouteRegex(
-                        getNamedRouteRegex(
-                          dataRoute.replace(/\.rsc$/, ''),
-                          false
-                        ).re.source.replace(/\(\?:\\\/\)\?\$$/, '\\.rsc$')
+                        getNamedRouteRegex(dataRoute, {
+                          prefixRouteKeys: false,
+                          includeSuffix: true,
+                          excludeOptionalTrailingSlash: true,
+                        }).re.source
                       ),
                   prefetchDataRoute,
                   prefetchDataRouteRegex: !prefetchDataRoute
                     ? undefined
                     : normalizeRouteRegex(
-                        getNamedRouteRegex(
-                          prefetchDataRoute.replace(/\.prefetch\.rsc$/, ''),
-                          false
-                        ).re.source.replace(
-                          /\(\?:\\\/\)\?\$$/,
-                          '\\.prefetch\\.rsc$'
-                        )
+                        getNamedRouteRegex(prefetchDataRoute, {
+                          prefixRouteKeys: false,
+                          includeSuffix: true,
+                          excludeOptionalTrailingSlash: true,
+                        }).re.source
                       ),
+                  allowHeader: ALLOWED_HEADERS,
                 }
               }
             }
@@ -3187,7 +3311,7 @@ export default async function build(
               .traceChild('move-exported-page')
               .traceAsyncFn(async () => {
                 file = `${file}.${ext}`
-                const orig = path.join(exportOptions.outdir, file)
+                const orig = path.join(outdir, file)
                 const pagePath = getPagePath(
                   originPage,
                   distDir,
@@ -3273,7 +3397,7 @@ export default async function build(
                       .replace(/\\/g, '/')
 
                     const updatedOrig = path.join(
-                      exportOptions.outdir,
+                      outdir,
                       locale + localeExt,
                       page === '/' ? '' : file
                     )
@@ -3314,6 +3438,16 @@ export default async function build(
                     orig,
                     path.join(distDir, 'server', updatedRelativeDest)
                   )
+
+                  // since the app router not found is prioritized over pages router,
+                  // we have to ensure the app router entries are available for all locales
+                  if (i18n) {
+                    for (const locale of i18n.locales) {
+                      const curPath = `/${locale}/404`
+                      pagesManifest[curPath] = updatedRelativeDest
+                    }
+                  }
+
                   pagesManifest['/404'] = updatedRelativeDest
                 }
               })
@@ -3388,10 +3522,11 @@ export default async function build(
                   for (const locale of i18n.locales) {
                     const localePage = `/${locale}${page === '/' ? '' : page}`
 
+                    const cacheControl = getCacheControl(localePage)
+
                     prerenderManifest.routes[localePage] = {
-                      initialRevalidateSeconds:
-                        exportResult.byPath.get(localePage)?.revalidate ??
-                        false,
+                      initialRevalidateSeconds: cacheControl.revalidate,
+                      initialExpireSeconds: cacheControl.expire,
                       experimentalPPR: undefined,
                       renderingMode: undefined,
                       srcRoute: null,
@@ -3401,12 +3536,15 @@ export default async function build(
                         `${file}.json`
                       ),
                       prefetchDataRoute: undefined,
+                      allowHeader: ALLOWED_HEADERS,
                     }
                   }
                 } else {
+                  const cacheControl = getCacheControl(page)
+
                   prerenderManifest.routes[page] = {
-                    initialRevalidateSeconds:
-                      exportResult.byPath.get(page)?.revalidate ?? false,
+                    initialRevalidateSeconds: cacheControl.revalidate,
+                    initialExpireSeconds: cacheControl.expire,
                     experimentalPPR: undefined,
                     renderingMode: undefined,
                     srcRoute: null,
@@ -3417,12 +3555,11 @@ export default async function build(
                     ),
                     // Pages does not have a prefetch data route.
                     prefetchDataRoute: undefined,
+                    allowHeader: ALLOWED_HEADERS,
                   }
                 }
-                // Set Page Revalidation Interval
                 if (pageInfo) {
-                  pageInfo.initialRevalidateSeconds =
-                    exportResult.byPath.get(page)?.revalidate ?? false
+                  pageInfo.initialCacheControl = getCacheControl(page)
                 }
               } else {
                 // For a dynamic SSG page, we did not copy its data exports and only
@@ -3430,10 +3567,10 @@ export default async function build(
                 // We must also copy specific versions of this page as defined by
                 // `getStaticPaths` (additionalSsgPaths).
                 for (const route of additionalPaths.get(page) ?? []) {
-                  const pageFile = normalizePagePath(route.path)
+                  const pageFile = normalizePagePath(route.pathname)
                   await moveExportedPage(
                     page,
-                    route.path,
+                    route.pathname,
                     pageFile,
                     isSsg,
                     'html',
@@ -3441,7 +3578,7 @@ export default async function build(
                   )
                   await moveExportedPage(
                     page,
-                    route.path,
+                    route.pathname,
                     pageFile,
                     isSsg,
                     'json',
@@ -3468,30 +3605,26 @@ export default async function build(
                     )
                   }
 
-                  const initialRevalidateSeconds =
-                    exportResult.byPath.get(route.path)?.revalidate ?? false
+                  const cacheControl = getCacheControl(route.pathname)
 
-                  if (typeof initialRevalidateSeconds === 'undefined') {
-                    throw new Error("Invariant: page wasn't built")
-                  }
-
-                  prerenderManifest.routes[route.path] = {
-                    initialRevalidateSeconds,
+                  prerenderManifest.routes[route.pathname] = {
+                    initialRevalidateSeconds: cacheControl.revalidate,
+                    initialExpireSeconds: cacheControl.expire,
                     experimentalPPR: undefined,
                     renderingMode: undefined,
                     srcRoute: page,
                     dataRoute: path.posix.join(
                       '/_next/data',
                       buildId,
-                      `${normalizePagePath(route.path)}.json`
+                      `${normalizePagePath(route.pathname)}.json`
                     ),
                     // Pages does not have a prefetch data route.
                     prefetchDataRoute: undefined,
+                    allowHeader: ALLOWED_HEADERS,
                   }
 
-                  // Set route Revalidation Interval
                   if (pageInfo) {
-                    pageInfo.initialRevalidateSeconds = initialRevalidateSeconds
+                    pageInfo.initialCacheControl = cacheControl
                   }
                 }
               }
@@ -3499,9 +3632,26 @@ export default async function build(
           }
 
           // remove temporary export folder
-          await fs.rm(exportOptions.outdir, { recursive: true, force: true })
+          await fs.rm(outdir, { recursive: true, force: true })
           await writeManifest(pagesManifestPath, pagesManifest)
         })
+
+        // As we may have modified the dynamicRoutes, we need to sort the
+        // dynamic routes by page.
+        routesManifest.dynamicRoutes = sortSortableRouteObjects(
+          dynamicRoutes,
+          (route) => ({
+            // If the route is PPR enabled, and has an associated source page,
+            // use it. Otherwise fallback to the page which should be the same.
+            sourcePage: sourcePages.get(route.page) ?? route.page,
+            page: route.page,
+          })
+        )
+
+        // Now write the routes manifest out.
+        await nextBuildSpan
+          .traceChild('write-routes-manifest')
+          .traceAsyncFn(() => writeManifest(routesManifestPath, routesManifest))
       }
 
       const postBuildSpinner = createSpinner('Finalizing page optimization')
@@ -3549,6 +3699,18 @@ export default async function build(
             NextBuildContext.telemetryState.packagesUsedInServerSideProps
           )
         )
+        const useCacheTracker = NextBuildContext.telemetryState.useCacheTracker
+
+        for (const [key, value] of Object.entries(useCacheTracker)) {
+          telemetry.record(
+            eventBuildFeatureUsage([
+              {
+                featureName: key as UseCacheTrackerKey,
+                invocationCount: value,
+              },
+            ])
+          )
+        }
       }
 
       if (ssgPages.size > 0 || appDir) {
@@ -3562,7 +3724,9 @@ export default async function build(
 
           prerenderManifest.dynamicRoutes[tbdRoute] = {
             routeRegex: normalizeRouteRegex(
-              getNamedRouteRegex(tbdRoute, false).re.source
+              getNamedRouteRegex(tbdRoute, {
+                prefixRouteKeys: false,
+              }).re.source
             ),
             experimentalPPR: undefined,
             renderingMode: undefined,
@@ -3573,15 +3737,20 @@ export default async function build(
                 ? `${normalizedRoute}.html`
                 : false,
             fallbackRevalidate: undefined,
+            fallbackExpire: undefined,
+            fallbackSourceRoute: undefined,
+            fallbackRootParams: undefined,
             dataRouteRegex: normalizeRouteRegex(
-              getNamedRouteRegex(
-                dataRoute.replace(/\.json$/, ''),
-                false
-              ).re.source.replace(/\(\?:\\\/\)\?\$$/, '\\.json$')
+              getNamedRouteRegex(dataRoute, {
+                prefixRouteKeys: true,
+                includeSuffix: true,
+                excludeOptionalTrailingSlash: true,
+              }).re.source
             ),
             // Pages does not have a prefetch data route.
             prefetchDataRoute: undefined,
             prefetchDataRouteRegex: undefined,
+            allowHeader: ALLOWED_HEADERS,
           }
         })
 
@@ -3595,7 +3764,7 @@ export default async function build(
         await writeClientSsgManifest(prerenderManifest, {
           distDir,
           buildId,
-          locales: config.i18n?.locales || [],
+          locales: config.i18n?.locales,
         })
       } else {
         await writePrerenderManifest(distDir, {
@@ -3639,6 +3808,12 @@ export default async function build(
         buildTracesSpinner = undefined
       }
 
+      if (isCompileMode) {
+        Log.info(
+          `Build ran with "compile" mode, to finalize the build run either "generate" or "generate-env" mode as well`
+        )
+      }
+
       if (config.output === 'export') {
         await writeFullyStaticExport(
           config,
@@ -3647,6 +3822,24 @@ export default async function build(
           configOutDir,
           nextBuildSpan
         )
+      }
+
+      if (config.experimental.adapterPath) {
+        await handleBuildComplete({
+          dir,
+          distDir,
+          tracingRoot: outputFileTracingRoot,
+          hasNodeMiddleware,
+          hasInstrumentationHook,
+          adapterPath: config.experimental.adapterPath,
+          pageKeys: pageKeys.pages,
+          appPageKeys: denormalizedAppPages,
+          routesManifest,
+          prerenderManifest,
+          middlewareManifest,
+          functionsConfigManifest,
+          requiredServerFiles: requiredServerFilesManifest.files,
+        })
       }
 
       if (config.output === 'standalone') {
@@ -3658,6 +3851,7 @@ export default async function build(
           outputFileTracingRoot,
           requiredServerFilesManifest,
           middlewareManifest,
+          hasNodeMiddleware,
           hasInstrumentationHook,
           staticPages,
           loadedEnvFiles,
@@ -3694,14 +3888,29 @@ export default async function build(
 
       await shutdownPromise
     })
+  } catch (e) {
+    const telemetry: Telemetry | undefined = traceGlobals.get('telemetry')
+    if (telemetry) {
+      telemetry.record(
+        eventBuildFailed({
+          bundler: getBundlerForTelemetry(isTurbopack),
+          errorCode: getErrorCodeForTelemetry(e),
+          durationInSeconds: Math.floor((Date.now() - buildStartTime) / 1000),
+        })
+      )
+    }
+    throw e
   } finally {
     // Ensure we wait for lockfile patching if present
     await lockfilePatchPromise.cur
 
+    if (isTurbopack && !process.env.__NEXT_TEST_MODE) {
+      warnAboutTurbopackBuilds(loadedConfig)
+    }
+
     // Ensure all traces are flushed before finishing the command
     await flushAllTraces()
     teardownTraceSubscriber()
-    teardownHeapProfiler()
 
     if (traceUploadUrl && loadedConfig) {
       uploadTrace({
@@ -3709,8 +3918,72 @@ export default async function build(
         mode: 'build',
         projectDir: dir,
         distDir: loadedConfig.distDir,
+        isTurboSession: isTurbopack,
         sync: true,
       })
     }
   }
+}
+
+function errorFromUnsupportedSegmentConfig(): never {
+  Log.error(
+    `Invalid segment configuration export detected. This can cause unexpected behavior from the configs not being applied. You should see the relevant failures in the logs above. Please fix them to continue.`
+  )
+  process.exit(1)
+}
+
+function warnAboutTurbopackBuilds(config?: NextConfigComplete) {
+  let warningStr =
+    `Support for Turbopack builds is experimental. ` +
+    bold(
+      `We don't recommend deploying mission-critical applications to production.`
+    )
+  warningStr +=
+    '\n\n- ' +
+    bold(
+      'Turbopack currently always builds production source maps for the browser. This will include project source code if deployed to production.'
+    )
+  warningStr +=
+    '\n- It is expected that your bundle size might be different from `next build` with webpack. This will be improved as we work towards stability.'
+
+  if (!config?.experimental.turbopackPersistentCaching) {
+    warningStr +=
+      '\n- This build is without disk caching; subsequent builds will become faster when disk caching becomes available.'
+  }
+
+  warningStr +=
+    '\n- When comparing output to webpack builds, make sure to first clear the Next.js cache by deleting the `.next` directory.'
+  warningStr +=
+    '\n\nProvide feedback for Turbopack builds at https://github.com/vercel/next.js/discussions/77721'
+
+  Log.warn(warningStr)
+}
+
+function getBundlerForTelemetry(isTurbopack: boolean) {
+  if (isTurbopack) {
+    return 'turbopack'
+  }
+
+  if (process.env.NEXT_RSPACK) {
+    return 'rspack'
+  }
+
+  return 'webpack'
+}
+
+function getErrorCodeForTelemetry(err: unknown) {
+  const code = extractNextErrorCode(err)
+  if (code != null) {
+    return code
+  }
+
+  if (err instanceof Error && 'code' in err && typeof err.code === 'string') {
+    return err.code
+  }
+
+  if (err instanceof Error) {
+    return err.name
+  }
+
+  return 'Unknown'
 }

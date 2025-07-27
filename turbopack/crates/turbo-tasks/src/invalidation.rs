@@ -1,27 +1,30 @@
 use std::{
-    any::{Any, TypeId},
     fmt::Display,
-    hash::{Hash, Hasher},
+    hash::Hash,
     mem::replace,
     sync::{Arc, Weak},
 };
 
 use anyhow::Result;
-use indexmap::{map::Entry, IndexMap, IndexSet};
-use serde::{de::Visitor, Deserialize, Serialize};
+use indexmap::map::Entry;
+use serde::{Deserialize, Serialize, de::Visitor};
 use tokio::runtime::Handle;
+use turbo_dyn_eq_hash::{
+    DynEq, DynHash, impl_eq_for_dyn, impl_hash_for_dyn, impl_partial_eq_for_dyn,
+};
 
 use crate::{
-    magic_any::HasherMut,
-    manager::{current_task, with_turbo_tasks},
+    FxIndexMap, FxIndexSet, TaskId, TurboTasksApi,
+    manager::{current_task, mark_invalidator, with_turbo_tasks},
     trace::TraceRawVcs,
     util::StaticOrArc,
-    TaskId, TurboTasksApi,
 };
 
 /// Get an [`Invalidator`] that can be used to invalidate the current task
 /// based on external events.
 pub fn get_invalidator() -> Invalidator {
+    mark_invalidator();
+
     let handle = Handle::current();
     Invalidator {
         task: current_task("turbo_tasks::get_invalidator()"),
@@ -43,7 +46,7 @@ impl Invalidator {
             turbo_tasks,
             handle,
         } = self;
-        let _ = handle.enter();
+        let _guard = handle.enter();
         if let Some(turbo_tasks) = turbo_tasks.upgrade() {
             turbo_tasks.invalidate(task);
         }
@@ -55,7 +58,7 @@ impl Invalidator {
             turbo_tasks,
             handle,
         } = self;
-        let _ = handle.enter();
+        let _guard = handle.enter();
         if let Some(turbo_tasks) = turbo_tasks.upgrade() {
             turbo_tasks.invalidate_with_reason(
                 task,
@@ -70,7 +73,7 @@ impl Invalidator {
             turbo_tasks,
             handle,
         } = self;
-        let _ = handle.enter();
+        let _guard = handle.enter();
         if let Some(turbo_tasks) = turbo_tasks.upgrade() {
             turbo_tasks
                 .invalidate_with_reason(task, (reason as &'static dyn InvalidationReason).into());
@@ -136,34 +139,11 @@ impl<'de> Deserialize<'de> for Invalidator {
     }
 }
 
-pub trait DynamicEqHash {
-    fn as_any(&self) -> &dyn Any;
-    fn dyn_eq(&self, other: &dyn Any) -> bool;
-    fn dyn_hash(&self, state: &mut dyn Hasher);
-}
-
-impl<T: Any + PartialEq + Eq + Hash> DynamicEqHash for T {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn dyn_eq(&self, other: &dyn Any) -> bool {
-        other
-            .downcast_ref::<Self>()
-            .map(|other| self.eq(other))
-            .unwrap_or(false)
-    }
-
-    fn dyn_hash(&self, state: &mut dyn Hasher) {
-        Hash::hash(&(TypeId::of::<Self>(), self), &mut HasherMut(state));
-    }
-}
-
 /// A user-facing reason why a task was invalidated. This should only be used
 /// for invalidation that were triggered by the user.
 ///
 /// Reasons are deduplicated, so this need to implement [Eq] and [Hash]
-pub trait InvalidationReason: DynamicEqHash + Display + Send + Sync + 'static {
+pub trait InvalidationReason: DynEq + DynHash + Display + Send + Sync + 'static {
     fn kind(&self) -> Option<StaticOrArc<dyn InvalidationReasonKind>> {
         None
     }
@@ -174,37 +154,23 @@ pub trait InvalidationReason: DynamicEqHash + Display + Send + Sync + 'static {
 ///
 /// Reason kinds are used a hash map key, so this need to implement [Eq] and
 /// [Hash]
-pub trait InvalidationReasonKind: DynamicEqHash + Send + Sync + 'static {
+pub trait InvalidationReasonKind: DynEq + DynHash + Send + Sync + 'static {
     /// Displays a description of multiple invalidation reasons of the same
     /// kind. It is only called with two or more reasons.
     fn fmt(
         &self,
-        data: &IndexSet<StaticOrArc<dyn InvalidationReason>>,
+        data: &FxIndexSet<StaticOrArc<dyn InvalidationReason>>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result;
 }
 
-macro_rules! impl_eq_hash {
-    ($ty:ty) => {
-        impl PartialEq for $ty {
-            fn eq(&self, other: &Self) -> bool {
-                DynamicEqHash::dyn_eq(self, other.as_any())
-            }
-        }
+impl_partial_eq_for_dyn!(dyn InvalidationReason);
+impl_eq_for_dyn!(dyn InvalidationReason);
+impl_hash_for_dyn!(dyn InvalidationReason);
 
-        impl Eq for $ty {}
-
-        impl Hash for $ty {
-            fn hash<H: Hasher>(&self, state: &mut H) {
-                self.as_any().type_id().hash(state);
-                DynamicEqHash::dyn_hash(self, state as &mut dyn Hasher)
-            }
-        }
-    };
-}
-
-impl_eq_hash!(dyn InvalidationReason);
-impl_eq_hash!(dyn InvalidationReasonKind);
+impl_partial_eq_for_dyn!(dyn InvalidationReasonKind);
+impl_eq_for_dyn!(dyn InvalidationReasonKind);
+impl_hash_for_dyn!(dyn InvalidationReasonKind);
 
 #[derive(PartialEq, Eq, Hash)]
 enum MapKey {
@@ -221,7 +187,7 @@ enum MapEntry {
         reason: StaticOrArc<dyn InvalidationReason>,
     },
     Multiple {
-        reasons: IndexSet<StaticOrArc<dyn InvalidationReason>>,
+        reasons: FxIndexSet<StaticOrArc<dyn InvalidationReason>>,
     },
 }
 
@@ -231,8 +197,8 @@ enum MapEntry {
 #[derive(Default)]
 pub struct InvalidationReasonSet {
     next_unique_tag: usize,
-    // We track typed and untyped entries in the same map to keep the occurence order of entries.
-    map: IndexMap<MapKey, MapEntry>,
+    // We track typed and untyped entries in the same map to keep the occurrence order of entries.
+    map: FxIndexMap<MapKey, MapEntry>,
 }
 
 impl InvalidationReasonSet {
@@ -245,7 +211,7 @@ impl InvalidationReasonSet {
                     match replace(
                         entry,
                         MapEntry::Multiple {
-                            reasons: IndexSet::new(),
+                            reasons: FxIndexSet::default(),
                         },
                     ) {
                         MapEntry::Single {
@@ -257,7 +223,7 @@ impl InvalidationReasonSet {
                                 };
                                 return;
                             }
-                            let mut reasons = IndexSet::new();
+                            let mut reasons = FxIndexSet::default();
                             reasons.insert(existing_reason);
                             reasons.insert(reason);
                             *entry = MapEntry::Multiple { reasons };
@@ -302,7 +268,7 @@ impl Display for InvalidationReasonSet {
             }
             match entry {
                 MapEntry::Single { reason } => {
-                    write!(f, "{}", reason)?;
+                    write!(f, "{reason}")?;
                 }
                 MapEntry::Multiple { reasons } => {
                     let MapKey::Typed { kind } = key else {

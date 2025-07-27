@@ -1,7 +1,16 @@
-use indexmap::IndexSet;
-use turbo_tasks::Vc;
+use serde::{Deserialize, Serialize};
+use turbo_tasks::{NonLocalValue, ResolvedVc, Vc, trace::TraceRawVcs};
 
 use crate::{asset::Asset, ident::AssetIdent, reference::ModuleReferences};
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, TraceRawVcs, NonLocalValue)]
+pub enum StyleType {
+    IsolatedStyle,
+    GlobalStyle,
+}
+
+#[turbo_tasks::value(transparent)]
+pub struct OptionStyleType(Option<StyleType>);
 
 /// A module. This usually represents parsed source code, which has references
 /// to other modules.
@@ -9,24 +18,34 @@ use crate::{asset::Asset, ident::AssetIdent, reference::ModuleReferences};
 pub trait Module: Asset {
     /// The identifier of the [Module]. It's expected to be unique and capture
     /// all properties of the [Module].
+    #[turbo_tasks::function]
     fn ident(&self) -> Vc<AssetIdent>;
 
     /// Other [Module]s or [OutputAsset]s referenced from this [Module].
     // TODO refactor to avoid returning [OutputAsset]s here
+    #[turbo_tasks::function]
     fn references(self: Vc<Self>) -> Vc<ModuleReferences> {
         ModuleReferences::empty()
     }
 
-    fn additional_layers_modules(self: Vc<Self>) -> Vc<Modules> {
-        Vc::cell(vec![])
+    /// Signifies the module itself is async, e.g. it uses top-level await, is a wasm module, etc.
+    #[turbo_tasks::function]
+    fn is_self_async(self: Vc<Self>) -> Vc<bool> {
+        Vc::cell(false)
+    }
+
+    /// The style type of the module.
+    #[turbo_tasks::function]
+    fn style_type(self: Vc<Self>) -> Vc<OptionStyleType> {
+        Vc::cell(None)
     }
 }
 
 #[turbo_tasks::value(transparent)]
-pub struct OptionModule(Option<Vc<Box<dyn Module>>>);
+pub struct OptionModule(Option<ResolvedVc<Box<dyn Module>>>);
 
 #[turbo_tasks::value(transparent)]
-pub struct Modules(Vec<Vc<Box<dyn Module>>>);
+pub struct Modules(Vec<ResolvedVc<Box<dyn Module>>>);
 
 #[turbo_tasks::value_impl]
 impl Modules {
@@ -35,17 +54,3 @@ impl Modules {
         Vc::cell(Vec::new())
     }
 }
-
-/// A set of [Module]s
-#[turbo_tasks::value(transparent)]
-pub struct ModulesSet(IndexSet<Vc<Box<dyn Module>>>);
-
-#[turbo_tasks::value_impl]
-impl ModulesSet {
-    #[turbo_tasks::function]
-    pub fn empty() -> Vc<Self> {
-        Vc::cell(IndexSet::new())
-    }
-}
-
-// TODO All Vc::try_resolve_downcast::<Box<dyn Module>> calls should be removed

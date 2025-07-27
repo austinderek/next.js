@@ -29,6 +29,7 @@ export const PHASE_DEVELOPMENT_SERVER = 'phase-development-server'
 export const PHASE_TEST = 'phase-test'
 export const PHASE_INFO = 'phase-info'
 export const PAGES_MANIFEST = 'pages-manifest.json'
+export const WEBPACK_STATS = 'webpack-stats.json'
 export const APP_PATHS_MANIFEST = 'app-paths-manifest.json'
 export const APP_PATH_ROUTES_MANIFEST = 'app-path-routes-manifest.json'
 export const BUILD_MANIFEST = 'build-manifest.json'
@@ -46,6 +47,7 @@ export const DEV_CLIENT_PAGES_MANIFEST = '_devPagesManifest.json'
 export const MIDDLEWARE_MANIFEST = 'middleware-manifest.json'
 export const TURBOPACK_CLIENT_MIDDLEWARE_MANIFEST =
   '_clientMiddlewareManifest.json'
+export const TURBOPACK_CLIENT_BUILD_MANIFEST = 'client-build-manifest.json'
 export const DEV_CLIENT_MIDDLEWARE_MANIFEST = '_devMiddlewareManifest.json'
 export const REACT_LOADABLE_MANIFEST = 'react-loadable-manifest.json'
 export const SERVER_DIRECTORY = 'server'
@@ -74,6 +76,8 @@ export const MIDDLEWARE_REACT_LOADABLE_MANIFEST =
 // server/interception-route-rewrite-manifest.js
 export const INTERCEPTION_ROUTE_REWRITE_MANIFEST =
   'interception-route-rewrite-manifest'
+// server/dynamic-css-manifest.js
+export const DYNAMIC_CSS_MANIFEST = 'dynamic-css-manifest'
 
 // static/runtime/main.js
 export const CLIENT_STATIC_FILES_RUNTIME_MAIN = `main`

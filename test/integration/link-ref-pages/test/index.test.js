@@ -10,13 +10,14 @@ import {
   nextStart,
   nextBuild,
   waitFor,
+  getClientBuildManifestLoaderChunkUrlPath,
 } from 'next-test-utils'
 
 let app
 let appPort
 const appDir = join(__dirname, '..')
 
-const noError = async (pathname) => {
+const collectErrors = async (pathname) => {
   const browser = await webdriver(appPort, '/')
   await browser.eval(`(function() {
     window.caughtErrors = []
@@ -29,12 +30,20 @@ const noError = async (pathname) => {
   })()`)
   await waitFor(1000)
   const errors = await browser.eval(`window.caughtErrors`)
-  expect(errors).toEqual([])
   await browser.close()
+  return errors
+}
+
+const noError = async (pathname) => {
+  const errors = await collectErrors(pathname)
+  expect(errors).toEqual([])
+  return errors
 }
 
 const didPrefetch = async (pathname) => {
   const browser = await webdriver(appPort, pathname)
+
+  let chunk = getClientBuildManifestLoaderChunkUrlPath(appDir, '/')
 
   await retry(async () => {
     const links = await browser.elementsByCss('link[rel=prefetch]')
@@ -43,9 +52,8 @@ const didPrefetch = async (pathname) => {
       links.map((link) => link.getAttribute('href'))
     )
 
-    // expect one of the href contain string "index"
     expect(hrefs).toEqual(
-      expect.arrayContaining([expect.stringContaining('index')])
+      expect.arrayContaining([expect.stringContaining(chunk)])
     )
   })
 
@@ -74,11 +82,21 @@ describe('Invalid hrefs', () => {
       runCommonTests()
 
       it('should not show error for function component with forwardRef', async () => {
-        await noError('/function')
+        const errors = await collectErrors('/function')
+        const legacyBehaviorDeprecation =
+          '`legacyBehavior` is deprecated and will be removed in a future release.'
+        errors.forEach((error) => {
+          expect(error).toContain(legacyBehaviorDeprecation)
+        })
       })
 
       it('should not show error for class component as child of next/link', async () => {
-        await noError('/class')
+        const errors = await collectErrors('/class')
+        const legacyBehaviorDeprecation =
+          '`legacyBehavior` is deprecated and will be removed in a future release.'
+        errors.forEach((error) => {
+          expect(error).toContain(legacyBehaviorDeprecation)
+        })
       })
 
       it('should handle child ref with React.createRef', async () => {

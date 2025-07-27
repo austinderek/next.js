@@ -2,30 +2,42 @@ import type { RequestData, FetchEventResult } from './types'
 import type { RequestInit } from './spec-extension/request'
 import { PageSignatureError } from './error'
 import { fromNodeOutgoingHttpHeaders, normalizeNextQueryParam } from './utils'
-import { NextFetchEvent } from './spec-extension/fetch-event'
+import {
+  NextFetchEvent,
+  getWaitUntilPromiseFromEvent,
+} from './spec-extension/fetch-event'
 import { NextRequest } from './spec-extension/request'
 import { NextResponse } from './spec-extension/response'
-import { relativizeURL } from '../../shared/lib/router/utils/relativize-url'
-import { waitUntilSymbol } from './spec-extension/fetch-event'
+import {
+  parseRelativeURL,
+  getRelativeURL,
+} from '../../shared/lib/router/utils/relativize-url'
 import { NextURL } from './next-url'
 import { stripInternalSearchParams } from '../internal-utils'
 import { normalizeRscURL } from '../../shared/lib/router/utils/app-paths'
-import { FLIGHT_HEADERS } from '../../client/components/app-router-headers'
-import { ensureInstrumentationRegistered } from './globals'
 import {
-  withRequestStore,
-  type WrapperRenderOpts,
-} from '../async-storage/with-request-store'
-import { requestAsyncStorage } from '../../client/components/request-async-storage.external'
+  FLIGHT_HEADERS,
+  NEXT_REWRITTEN_PATH_HEADER,
+  NEXT_REWRITTEN_QUERY_HEADER,
+  RSC_HEADER,
+} from '../../client/components/app-router-headers'
+import { ensureInstrumentationRegistered } from './globals'
+import { createRequestStoreForAPI } from '../async-storage/request-store'
+import { workUnitAsyncStorage } from '../app-render/work-unit-async-storage.external'
+import { createWorkStore } from '../async-storage/work-store'
+import { workAsyncStorage } from '../app-render/work-async-storage.external'
+import { NEXT_ROUTER_PREFETCH_HEADER } from '../../client/components/app-router-headers'
 import { getTracer } from '../lib/trace/tracer'
 import type { TextMapGetter } from 'next/dist/compiled/@opentelemetry/api'
 import { MiddlewareSpan } from '../lib/trace/constants'
 import { CloseController } from './web-on-close'
 import { getEdgePreviewProps } from './get-edge-preview-props'
+import { getBuiltinRequestContext } from '../after/builtin-request-context'
+import { getImplicitTags } from '../lib/implicit-tags'
 
 export class NextRequestHint extends NextRequest {
   sourcePage: string
-  fetchMetrics?: FetchEventResult['fetchMetrics']
+  fetchMetrics: FetchEventResult['fetchMetrics'] | undefined
 
   constructor(params: {
     init: RequestInit
@@ -59,6 +71,8 @@ export type AdapterOptions = {
   page: string
   request: RequestData
   IncrementalCache?: typeof import('../lib/incremental-cache').IncrementalCache
+  incrementalCacheHandler?: typeof import('../lib/incremental-cache').CacheHandler
+  bypassNextUrl?: boolean
 }
 
 let propagator: <T>(request: NextRequestHint, fn: () => T) => T = (
@@ -75,10 +89,9 @@ function ensureTestApisIntercepted() {
   if (!testApisIntercepted) {
     testApisIntercepted = true
     if (process.env.NEXT_PRIVATE_TEST_PROXY === 'true') {
-      const {
-        interceptTestApis,
-        wrapRequestHandler,
-      } = require('next/dist/experimental/testmode/server-edge')
+      const { interceptTestApis, wrapRequestHandler } =
+        // eslint-disable-next-line @next/internal/typechecked-require -- experimental/testmode is not built ins next/dist/esm
+        require('next/dist/experimental/testmode/server-edge') as typeof import('../../experimental/testmode/server-edge')
       interceptTestApis()
       propagator = wrapRequestHandler(propagator)
     }
@@ -92,63 +105,71 @@ export async function adapter(
   await ensureInstrumentationRegistered()
 
   // TODO-APP: use explicit marker for this
-  const isEdgeRendering = typeof self.__BUILD_MANIFEST !== 'undefined'
+  const isEdgeRendering =
+    typeof (globalThis as any).__BUILD_MANIFEST !== 'undefined'
 
   params.request.url = normalizeRscURL(params.request.url)
 
-  const requestUrl = new NextURL(params.request.url, {
-    headers: params.request.headers,
-    nextConfig: params.request.nextConfig,
-  })
+  const requestURL = params.bypassNextUrl
+    ? new URL(params.request.url)
+    : new NextURL(params.request.url, {
+        headers: params.request.headers,
+        nextConfig: params.request.nextConfig,
+      })
 
   // Iterator uses an index to keep track of the current iteration. Because of deleting and appending below we can't just use the iterator.
   // Instead we use the keys before iteration.
-  const keys = [...requestUrl.searchParams.keys()]
+  const keys = [...requestURL.searchParams.keys()]
   for (const key of keys) {
-    const value = requestUrl.searchParams.getAll(key)
+    const value = requestURL.searchParams.getAll(key)
 
-    normalizeNextQueryParam(key, (normalizedKey) => {
-      requestUrl.searchParams.delete(normalizedKey)
-
+    const normalizedKey = normalizeNextQueryParam(key)
+    if (normalizedKey) {
+      requestURL.searchParams.delete(normalizedKey)
       for (const val of value) {
-        requestUrl.searchParams.append(normalizedKey, val)
+        requestURL.searchParams.append(normalizedKey, val)
       }
-      requestUrl.searchParams.delete(key)
-    })
+      requestURL.searchParams.delete(key)
+    }
   }
 
   // Ensure users only see page requests, never data requests.
-  const buildId = requestUrl.buildId
-  requestUrl.buildId = ''
-
-  const isNextDataRequest = params.request.headers['x-nextjs-data']
-
-  if (isNextDataRequest && requestUrl.pathname === '/index') {
-    requestUrl.pathname = '/'
+  let buildId = process.env.__NEXT_BUILD_ID || ''
+  if ('buildId' in requestURL) {
+    buildId = (requestURL as NextURL).buildId || ''
+    requestURL.buildId = ''
   }
 
   const requestHeaders = fromNodeOutgoingHttpHeaders(params.request.headers)
+  const isNextDataRequest = requestHeaders.has('x-nextjs-data')
+  const isRSCRequest = requestHeaders.get(RSC_HEADER) === '1'
+
+  if (isNextDataRequest && requestURL.pathname === '/index') {
+    requestURL.pathname = '/'
+  }
+
   const flightHeaders = new Map()
+
   // Headers should only be stripped for middleware
   if (!isEdgeRendering) {
     for (const header of FLIGHT_HEADERS) {
       const key = header.toLowerCase()
       const value = requestHeaders.get(key)
-      if (value) {
+      if (value !== null) {
         flightHeaders.set(key, value)
         requestHeaders.delete(key)
       }
     }
   }
 
-  const normalizeUrl = process.env.__NEXT_NO_MIDDLEWARE_URL_NORMALIZE
+  const normalizeURL = process.env.__NEXT_NO_MIDDLEWARE_URL_NORMALIZE
     ? new URL(params.request.url)
-    : requestUrl
+    : requestURL
 
   const request = new NextRequestHint({
     page: params.page,
     // Strip internal query parameters off the request.
-    input: stripInternalSearchParams(normalizeUrl, true).toString(),
+    input: stripInternalSearchParams(normalizeURL).toString(),
     init: {
       body: params.request.body,
       headers: requestHeaders,
@@ -171,19 +192,23 @@ export async function adapter(
   }
 
   if (
-    !(globalThis as any).__incrementalCache &&
+    // If we are inside of the next start sandbox
+    // leverage the shared instance if not we need
+    // to create a fresh cache instance each time
+    !(globalThis as any).__incrementalCacheShared &&
     (params as any).IncrementalCache
   ) {
     ;(globalThis as any).__incrementalCache = new (
-      params as any
+      params as {
+        IncrementalCache: typeof import('../lib/incremental-cache').IncrementalCache
+      }
     ).IncrementalCache({
-      appDir: true,
-      fetchCache: true,
+      CurCacheHandler: params.incrementalCacheHandler,
       minimalMode: process.env.NODE_ENV !== 'development',
       fetchCacheKeyPrefix: process.env.__NEXT_FETCH_CACHE_KEY_PREFIX,
       dev: process.env.NODE_ENV === 'development',
       requestHeaders: params.request.headers as any,
-      requestProtocol: 'https',
+
       getPrerenderManifest: () => {
         return {
           version: -1 as any, // letting us know this doesn't conform to spec
@@ -196,7 +221,16 @@ export async function adapter(
     })
   }
 
-  const event = new NextFetchEvent({ request, page: params.page })
+  // if we're in an edge runtime sandbox, we should use the waitUntil
+  // that we receive from the enclosing NextServer
+  const outerWaitUntil =
+    params.request.waitUntil ?? getBuiltinRequestContext()?.waitUntil
+
+  const event = new NextFetchEvent({
+    request,
+    page: params.page,
+    context: outerWaitUntil ? { waitUntil: outerWaitUntil } : undefined,
+  })
   let response
   let cookiesFromResponse
 
@@ -209,17 +243,9 @@ export async function adapter(
       // if we're in an edge function, we only get a subset of `nextConfig` (no `experimental`),
       // so we have to inject it via DefinePlugin.
       // in `next start` this will be passed normally (see `NextNodeServer.runMiddleware`).
-      const isAfterEnabled =
-        params.request.nextConfig?.experimental?.after ??
-        !!process.env.__NEXT_AFTER
 
-      let waitUntil: WrapperRenderOpts['waitUntil'] = undefined
-      let closeController: CloseController | undefined = undefined
-
-      if (isAfterEnabled) {
-        waitUntil = event.waitUntil.bind(event)
-        closeController = new CloseController()
-      }
+      const waitUntil = event.waitUntil.bind(event)
+      const closeController = new CloseController()
 
       return getTracer().trace(
         MiddlewareSpan.execute,
@@ -232,39 +258,67 @@ export async function adapter(
         },
         async () => {
           try {
+            const onUpdateCookies = (cookies: Array<string>) => {
+              cookiesFromResponse = cookies
+            }
             const previewProps = getEdgePreviewProps()
+            const page = '/' // Fake Work
+            const fallbackRouteParams = null
 
-            return await withRequestStore(
-              requestAsyncStorage,
-              {
-                req: request,
-                url: request.nextUrl,
-                renderOpts: {
-                  onUpdateCookies: (cookies) => {
-                    cookiesFromResponse = cookies
-                  },
-                  previewProps,
-                  waitUntil,
-                  onClose: closeController
-                    ? closeController.onClose.bind(closeController)
-                    : undefined,
-                  experimental: {
-                    after: isAfterEnabled,
-                  },
+            const implicitTags = await getImplicitTags(
+              page,
+              request.nextUrl,
+              fallbackRouteParams
+            )
+
+            const requestStore = createRequestStoreForAPI(
+              request,
+              request.nextUrl,
+              implicitTags,
+              onUpdateCookies,
+              previewProps
+            )
+
+            const workStore = createWorkStore({
+              page,
+              renderOpts: {
+                cacheLifeProfiles:
+                  params.request.nextConfig?.experimental?.cacheLife,
+                experimental: {
+                  isRoutePPREnabled: false,
+                  cacheComponents: false,
+                  authInterrupts:
+                    !!params.request.nextConfig?.experimental?.authInterrupts,
                 },
+                supportsDynamicResponse: true,
+                waitUntil,
+                onClose: closeController.onClose.bind(closeController),
+                onAfterTaskError: undefined,
               },
-              () => params.handler(request, event)
+              requestEndedState: { ended: false },
+              isPrefetchRequest: request.headers.has(
+                NEXT_ROUTER_PREFETCH_HEADER
+              ),
+              buildId: buildId ?? '',
+              previouslyRevalidatedTags: [],
+            })
+
+            return await workAsyncStorage.run(workStore, () =>
+              workUnitAsyncStorage.run(
+                requestStore,
+                params.handler,
+                request,
+                event
+              )
             )
           } finally {
             // middleware cannot stream, so we can consider the response closed
             // as soon as the handler returns.
-            if (closeController) {
-              // we can delay running it until a bit later --
-              // if it's needed, we'll have a `waitUntil` lock anyway.
-              setTimeout(() => {
-                closeController!.dispatchClose()
-              }, 0)
-            }
+            // we can delay running it until a bit later --
+            // if it's needed, we'll have a `waitUntil` lock anyway.
+            setTimeout(() => {
+              closeController.dispatchClose()
+            }, 0)
           }
         }
       )
@@ -288,17 +342,17 @@ export async function adapter(
    * a data URL if the request was a data request.
    */
   const rewrite = response?.headers.get('x-middleware-rewrite')
-  if (response && rewrite && !isEdgeRendering) {
-    const rewriteUrl = new NextURL(rewrite, {
+  if (response && rewrite && (isRSCRequest || !isEdgeRendering)) {
+    const destination = new NextURL(rewrite, {
       forceLocale: true,
       headers: params.request.headers,
       nextConfig: params.request.nextConfig,
     })
 
-    if (!process.env.__NEXT_NO_MIDDLEWARE_URL_NORMALIZE) {
-      if (rewriteUrl.host === request.nextUrl.host) {
-        rewriteUrl.buildId = buildId || rewriteUrl.buildId
-        response.headers.set('x-middleware-rewrite', String(rewriteUrl))
+    if (!process.env.__NEXT_NO_MIDDLEWARE_URL_NORMALIZE && !isEdgeRendering) {
+      if (destination.host === request.nextUrl.host) {
+        destination.buildId = buildId || destination.buildId
+        response.headers.set('x-middleware-rewrite', String(destination))
       }
     }
 
@@ -307,22 +361,39 @@ export async function adapter(
      * with an internal header so the client knows which component to load
      * from the data request.
      */
-    const relativizedRewrite = relativizeURL(
-      String(rewriteUrl),
-      String(requestUrl)
+    const { url: relativeDestination, isRelative } = parseRelativeURL(
+      destination.toString(),
+      requestURL.toString()
     )
 
     if (
+      !isEdgeRendering &&
       isNextDataRequest &&
       // if the rewrite is external and external rewrite
       // resolving config is enabled don't add this header
       // so the upstream app can set it instead
       !(
         process.env.__NEXT_EXTERNAL_MIDDLEWARE_REWRITE_RESOLVE &&
-        relativizedRewrite.match(/http(s)?:\/\//)
+        relativeDestination.match(/http(s)?:\/\//)
       )
     ) {
-      response.headers.set('x-nextjs-rewrite', relativizedRewrite)
+      response.headers.set('x-nextjs-rewrite', relativeDestination)
+    }
+
+    // If this is an RSC request, and the pathname or search has changed, and
+    // this isn't an external rewrite, we need to set the rewritten pathname and
+    // query headers.
+    if (isRSCRequest && isRelative) {
+      if (requestURL.pathname !== destination.pathname) {
+        response.headers.set(NEXT_REWRITTEN_PATH_HEADER, destination.pathname)
+      }
+      if (requestURL.search !== destination.search) {
+        response.headers.set(
+          NEXT_REWRITTEN_QUERY_HEADER,
+          // remove the leading ? from the search string
+          destination.search.slice(1)
+        )
+      }
     }
   }
 
@@ -346,9 +417,9 @@ export async function adapter(
     response = new Response(response.body, response)
 
     if (!process.env.__NEXT_NO_MIDDLEWARE_URL_NORMALIZE) {
-      if (redirectURL.host === request.nextUrl.host) {
+      if (redirectURL.host === requestURL.host) {
         redirectURL.buildId = buildId || redirectURL.buildId
-        response.headers.set('Location', String(redirectURL))
+        response.headers.set('Location', redirectURL.toString())
       }
     }
 
@@ -361,7 +432,7 @@ export async function adapter(
       response.headers.delete('Location')
       response.headers.set(
         'x-nextjs-redirect',
-        relativizeURL(String(redirectURL), String(requestUrl))
+        getRelativeURL(redirectURL.toString(), requestURL.toString())
       )
     }
   }
@@ -389,7 +460,7 @@ export async function adapter(
 
   return {
     response: finalResponse,
-    waitUntil: Promise.all(event[waitUntilSymbol]),
+    waitUntil: getWaitUntilPromiseFromEvent(event) ?? Promise.resolve(),
     fetchMetrics: request.fetchMetrics,
   }
 }

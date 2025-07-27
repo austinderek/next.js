@@ -1,45 +1,34 @@
-// imports polyfill from `@next/polyfill-module` after build.
-import '../build/polyfills/polyfill-module'
+import './app-globals'
 import ReactDOMClient from 'react-dom/client'
 import React, { use } from 'react'
+// TODO: Explicitly import from client.browser
 // eslint-disable-next-line import/no-extraneous-dependencies
-import { createFromReadableStream } from 'react-server-dom-webpack/client'
-
+import { createFromReadableStream as createFromReadableStreamBrowser } from 'react-server-dom-webpack/client'
 import { HeadManagerContext } from '../shared/lib/head-manager-context.shared-runtime'
-import { onRecoverableError } from './on-recoverable-error'
+import { onRecoverableError } from './react-client-callbacks/on-recoverable-error'
+import {
+  onCaughtError,
+  onUncaughtError,
+} from './react-client-callbacks/error-boundary-callbacks'
 import { callServer } from './app-call-server'
+import { findSourceMapURL } from './app-find-source-map-url'
 import {
   type AppRouterActionQueue,
   createMutableActionQueue,
-} from '../shared/lib/router/action-queue'
-import { isNextRouterError } from './components/is-next-router-error'
-import { handleClientError } from './components/react-dev-overlay/internal/helpers/use-error-handler'
+} from './components/app-router-instance'
 import AppRouter from './components/app-router'
 import type { InitialRSCPayload } from '../server/app-render/types'
 import { createInitialRouterState } from './components/router-reducer/create-initial-router-state'
 import { MissingSlotContext } from '../shared/lib/app-router-context.shared-runtime'
-
-// Patch console.error to collect information about hydration errors
-const origConsoleError = window.console.error
-window.console.error = (...args) => {
-  // See https://github.com/facebook/react/blob/d50323eb845c5fde0d720cae888bf35dedd05506/packages/react-reconciler/src/ReactFiberErrorLogger.js#L78
-  const error = process.env.NODE_ENV !== 'production' ? args[1] : args[0]
-  if (!isNextRouterError(error)) {
-    if (process.env.NODE_ENV !== 'production') {
-      const { storeHydrationErrorStateFromConsoleArgs } =
-        require('./components/react-dev-overlay/internal/helpers/hydration-error-info') as typeof import('./components/react-dev-overlay/internal/helpers/hydration-error-info')
-
-      storeHydrationErrorStateFromConsoleArgs(...args)
-      handleClientError(error)
-    }
-
-    origConsoleError.apply(window.console, args)
-  }
-}
+import { setAppBuildId } from './app-build-id'
+import { isBot } from '../shared/lib/router/utils/is-bot'
 
 /// <reference types="react-dom/experimental" />
 
-const appElement: HTMLElement | Document | null = document
+const createFromReadableStream =
+  createFromReadableStreamBrowser as (typeof import('react-server-dom-webpack/client.browser'))['createFromReadableStream']
+
+const appElement: HTMLElement | Document = document
 
 const encoder = new TextEncoder()
 
@@ -51,13 +40,24 @@ let initialServerDataFlushed = false
 
 let initialFormStateData: null | any = null
 
-function nextServerDataCallback(
-  seg:
-    | [isBootStrap: 0]
-    | [isNotBootstrap: 1, responsePartial: string]
-    | [isFormState: 2, formState: any]
-    | [isBinary: 3, responseBase64Partial: string]
-): void {
+type FlightSegment =
+  | [isBootStrap: 0]
+  | [isNotBootstrap: 1, responsePartial: string]
+  | [isFormState: 2, formState: any]
+  | [isBinary: 3, responseBase64Partial: string]
+
+type NextFlight = Omit<Array<FlightSegment>, 'push'> & {
+  push: (seg: FlightSegment) => void
+}
+
+declare global {
+  // If you're working in a browser environment
+  interface Window {
+    __next_f: NextFlight
+  }
+}
+
+function nextServerDataCallback(seg: FlightSegment): void {
   if (seg[0] === 0) {
     initialServerDataBuffer = []
   } else if (seg[0] === 1) {
@@ -144,8 +144,7 @@ if (document.readyState === 'loading') {
   setTimeout(DOMContentLoaded)
 }
 
-const nextServerDataLoadingGlobal = ((self as any).__next_f =
-  (self as any).__next_f || [])
+const nextServerDataLoadingGlobal = (self.__next_f = self.__next_f || [])
 nextServerDataLoadingGlobal.forEach(nextServerDataCallback)
 nextServerDataLoadingGlobal.push = nextServerDataCallback
 
@@ -155,45 +154,24 @@ const readable = new ReadableStream({
   },
 })
 
-const initialServerResponse = createFromReadableStream(readable, {
-  callServer,
-})
-
-// React overrides `.then` and doesn't return a new promise chain,
-// so we wrap the action queue in a promise to ensure that its value
-// is defined when the promise resolves.
-// https://github.com/facebook/react/blob/163365a07872337e04826c4f501565d43dbd2fd4/packages/react-client/src/ReactFlightClient.js#L189-L190
-const pendingActionQueue: Promise<AppRouterActionQueue> = new Promise(
-  (resolve, reject) => {
-    initialServerResponse.then(
-      (initialRSCPayload: InitialRSCPayload) => {
-        resolve(
-          createMutableActionQueue(
-            createInitialRouterState({
-              buildId: initialRSCPayload.b,
-              initialFlightData: initialRSCPayload.f,
-              initialCanonicalUrlParts: initialRSCPayload.c,
-              initialParallelRoutes: new Map(),
-              location: window.location,
-              couldBeIntercepted: initialRSCPayload.i,
-              postponed: initialRSCPayload.s,
-            })
-          )
-        )
-      },
-      (err: Error) => reject(err)
-    )
-  }
+const initialServerResponse = createFromReadableStream<InitialRSCPayload>(
+  readable,
+  { callServer, findSourceMapURL }
 )
 
-function ServerRoot(): React.ReactNode {
-  const initialRSCPayload = use<InitialRSCPayload>(initialServerResponse)
+function ServerRoot({
+  pendingActionQueue,
+}: {
+  pendingActionQueue: Promise<AppRouterActionQueue>
+}): React.ReactNode {
+  const initialRSCPayload = use(initialServerResponse)
   const actionQueue = use<AppRouterActionQueue>(pendingActionQueue)
 
   const router = (
     <AppRouter
+      gracefullyDegrade={isBot(window.navigator.userAgent)}
       actionQueue={actionQueue}
-      globalErrorComponent={initialRSCPayload.G}
+      globalErrorState={initialRSCPayload.G}
       assetPrefix={initialRSCPayload.p}
     />
   )
@@ -220,6 +198,7 @@ function Root({ children }: React.PropsWithChildren<{}>) {
     // eslint-disable-next-line react-hooks/rules-of-hooks
     React.useEffect(() => {
       window.__NEXT_HYDRATED = true
+      window.__NEXT_HYDRATED_AT = performance.now()
       window.__NEXT_HYDRATED_CB?.()
     }, [])
   }
@@ -227,42 +206,93 @@ function Root({ children }: React.PropsWithChildren<{}>) {
   return children
 }
 
-export function hydrate() {
+function onDefaultTransitionIndicator() {
+  // TODO: Compose default with user-configureable (e.g. nprogress)
+  // TODO: Use React's default once we figure out hanging indicators: https://codesandbox.io/p/sandbox/charming-moon-hktkp6?file=%2Fsrc%2Findex.js%3A106%2C30
+  return () => {}
+}
+
+const reactRootOptions: ReactDOMClient.RootOptions = {
+  onDefaultTransitionIndicator: onDefaultTransitionIndicator,
+  onRecoverableError,
+  onCaughtError,
+  onUncaughtError,
+}
+
+export type ClientInstrumentationHooks = {
+  onRouterTransitionStart?: (
+    url: string,
+    navigationType: 'push' | 'replace' | 'traverse'
+  ) => void
+}
+
+export function hydrate(
+  instrumentationHooks: ClientInstrumentationHooks | null
+) {
+  // React overrides `.then` and doesn't return a new promise chain,
+  // so we wrap the action queue in a promise to ensure that its value
+  // is defined when the promise resolves.
+  // https://github.com/facebook/react/blob/163365a07872337e04826c4f501565d43dbd2fd4/packages/react-client/src/ReactFlightClient.js#L189-L190
+  const pendingActionQueue: Promise<AppRouterActionQueue> = new Promise(
+    (resolve, reject) => {
+      initialServerResponse.then(
+        (initialRSCPayload) => {
+          // setAppBuildId should be called only once, during JS initialization
+          // and before any components have hydrated.
+          setAppBuildId(initialRSCPayload.b)
+
+          const initialTimestamp = Date.now()
+
+          resolve(
+            createMutableActionQueue(
+              createInitialRouterState({
+                navigatedAt: initialTimestamp,
+                initialFlightData: initialRSCPayload.f,
+                initialCanonicalUrlParts: initialRSCPayload.c,
+                initialParallelRoutes: new Map(),
+                location: window.location,
+                couldBeIntercepted: initialRSCPayload.i,
+                postponed: initialRSCPayload.s,
+                prerendered: initialRSCPayload.S,
+              }),
+              instrumentationHooks
+            )
+          )
+        },
+        (err: Error) => reject(err)
+      )
+    }
+  )
+
   const reactEl = (
     <StrictModeIfEnabled>
       <HeadManagerContext.Provider value={{ appDir: true }}>
         <Root>
-          <ServerRoot />
+          <ServerRoot pendingActionQueue={pendingActionQueue} />
         </Root>
       </HeadManagerContext.Provider>
     </StrictModeIfEnabled>
   )
 
-  const rootLayoutMissingTags = window.__next_root_layout_missing_tags
-  const hasMissingTags = !!rootLayoutMissingTags?.length
-
-  const options = {
-    onRecoverableError,
-  } satisfies ReactDOMClient.RootOptions
-  const isError =
-    document.documentElement.id === '__next_error__' || hasMissingTags
-
-  if (isError) {
+  if (document.documentElement.id === '__next_error__') {
+    let element = reactEl
+    // Server rendering failed, fall back to client-side rendering
     if (process.env.NODE_ENV !== 'production') {
-      const createDevOverlayElement =
-        require('./components/react-dev-overlay/client-entry').createDevOverlayElement
-      const errorTree = createDevOverlayElement(reactEl)
-      ReactDOMClient.createRoot(appElement as any, options).render(errorTree)
-    } else {
-      ReactDOMClient.createRoot(appElement as any, options).render(reactEl)
+      const { createRootLevelDevOverlayElement } =
+        require('../next-devtools/userspace/app/client-entry') as typeof import('../next-devtools/userspace/app/client-entry')
+
+      // Note this won't cause hydration mismatch because we are doing CSR w/o hydration
+      element = createRootLevelDevOverlayElement(element)
     }
+
+    ReactDOMClient.createRoot(appElement, reactRootOptions).render(element)
   } else {
-    React.startTransition(() =>
-      (ReactDOMClient as any).hydrateRoot(appElement, reactEl, {
-        ...options,
+    React.startTransition(() => {
+      ReactDOMClient.hydrateRoot(appElement, reactEl, {
+        ...reactRootOptions,
         formState: initialFormStateData,
       })
-    )
+    })
   }
 
   // TODO-APP: Remove this logic when Float has GC built-in in development.

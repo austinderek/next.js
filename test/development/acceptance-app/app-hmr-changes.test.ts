@@ -1,5 +1,5 @@
 import { FileRef, nextTestSetup } from 'e2e-utils'
-import { sandbox } from 'development-sandbox'
+import { createSandbox } from 'development-sandbox'
 import path from 'path'
 
 jest.setTimeout(240 * 1000)
@@ -22,16 +22,16 @@ describe('Error overlay - RSC build errors', () => {
   })
 
   // TODO: The error overlay is not closed when restoring the working code.
-  ;(process.env.TURBOPACK ? describe : describe.skip)(
+  ;(process.env.IS_TURBOPACK_TEST ? describe : describe.skip)(
     'Skipped in webpack',
     () => {
       it('should handle successive HMR changes with errors correctly', async () => {
-        const { session, cleanup } = await sandbox(
+        await using sandbox = await createSandbox(
           next,
           undefined,
           '/2020/develop-preview-test'
         )
-
+        const { session } = sandbox
         expect(
           await session.evaluate('document.documentElement.innerHTML')
         ).toContain('A few years ago I tweeted')
@@ -62,8 +62,6 @@ describe('Error overlay - RSC build errors', () => {
         expect(
           await session.evaluate('document.documentElement.innerHTML')
         ).toContain('A few years ago I tweeted')
-
-        await cleanup()
       })
     }
   )

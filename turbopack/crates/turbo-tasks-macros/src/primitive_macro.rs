@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse_macro_input;
-use turbo_tasks_macros_shared::{get_type_ident, PrimitiveInput};
+use turbo_tasks_macros_shared::{PrimitiveInput, get_type_ident};
 
 use crate::value_macro::value_type_and_register;
 
@@ -62,7 +62,6 @@ pub fn primitive(input: TokenStream) -> TokenStream {
         #value_type_and_register
 
         #value_debug_impl
-
         #value_default_impl
     }
     .into()

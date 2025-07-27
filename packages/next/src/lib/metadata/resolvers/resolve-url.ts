@@ -6,7 +6,10 @@ function isStringOrURL(icon: any): icon is string | URL {
 }
 
 function createLocalMetadataBase() {
-  return new URL(`http://localhost:${process.env.PORT || 3000}`)
+  // Check if experimental HTTPS is enabled
+  const isExperimentalHttps = Boolean(process.env.__NEXT_EXPERIMENTAL_HTTPS)
+  const protocol = isExperimentalHttps ? 'https' : 'http'
+  return new URL(`${protocol}://localhost:${process.env.PORT || 3000}`)
 }
 
 function getPreviewDeploymentUrl(): URL | undefined {
@@ -19,13 +22,17 @@ function getProductionDeploymentUrl(): URL | undefined {
   return origin ? new URL(`https://${origin}`) : undefined
 }
 
-// For deployment url for metadata routes, prefer to use the deployment url if possible
-// as these routes are unique to the deployments url.
-export function getSocialImageFallbackMetadataBase(metadataBase: URL | null): {
-  fallbackMetadataBase: URL
-  isMetadataBaseMissing: boolean
-} {
-  const isMetadataBaseMissing = !metadataBase
+/**
+ * Given an optional user-provided metadataBase, this determines what the metadataBase should
+ * fallback to. Specifically:
+ * - In dev, it should always be localhost
+ * - In Vercel preview builds, it should be the preview build ID
+ * - In start, it should be the user-provided metadataBase value. Otherwise,
+ * it'll fall back to the Vercel production deployment, and localhost as a last resort.
+ */
+export function getSocialImageMetadataBaseFallback(
+  metadataBase: URL | null
+): URL {
   const defaultMetadataBase = createLocalMetadataBase()
   const previewDeploymentUrl = getPreviewDeploymentUrl()
   const productionDeploymentUrl = getProductionDeploymentUrl()
@@ -42,10 +49,7 @@ export function getSocialImageFallbackMetadataBase(metadataBase: URL | null): {
         : metadataBase || productionDeploymentUrl || defaultMetadataBase
   }
 
-  return {
-    fallbackMetadataBase,
-    isMetadataBaseMissing,
-  }
+  return fallbackMetadataBase
 }
 
 function resolveUrl(url: null | undefined, metadataBase: URL | null): null
@@ -72,8 +76,8 @@ function resolveUrl(
   }
 
   // Handle relative or absolute paths
-  const basePath = metadataBase.pathname || ''
-  const joinedPath = path.posix.join(basePath, url)
+  const pathname = metadataBase.pathname || ''
+  const joinedPath = path.posix.join(pathname, url)
 
   return new URL(joinedPath, metadataBase)
 }
@@ -97,7 +101,8 @@ function isFilePattern(pathname: string): boolean {
 function resolveAbsoluteUrlWithPathname(
   url: string | URL,
   metadataBase: URL | null,
-  { trailingSlash, pathname }: MetadataContext
+  pathname: string,
+  { trailingSlash }: MetadataContext
 ): string {
   // Resolve url with pathname that always starts with `/`
   url = resolveRelativeUrl(url, pathname)

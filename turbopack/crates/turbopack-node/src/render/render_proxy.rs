@@ -1,20 +1,22 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use async_stream::try_stream as generator;
 use futures::{
-    channel::mpsc::{unbounded, UnboundedSender},
-    pin_mut, SinkExt, StreamExt, TryStreamExt,
+    SinkExt, StreamExt, TryStreamExt,
+    channel::mpsc::{UnboundedSender, unbounded},
+    pin_mut,
 };
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
-    duration_span, mark_finished, prevent_gc, util::SharedError, RawVc, RcStr, TaskInput,
-    ValueToString, Vc,
+    RawVc, ResolvedVc, TaskInput, ValueToString, Vc, VcValueType, duration_span, mark_finished,
+    prevent_gc, trace::TraceRawVcs, util::SharedError,
 };
 use turbo_tasks_bytes::{Bytes, Stream};
 use turbo_tasks_env::ProcessEnv;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
-    chunk::{ChunkingContext, EvaluatableAssets},
+    chunk::{ChunkingContext, EvaluatableAsset, EvaluatableAssets},
     error::PrettyPrintError,
     issue::{IssueExt, StyledString},
     module::Module,
@@ -22,28 +24,28 @@ use turbopack_core::{
 use turbopack_dev_server::source::{Body, ProxyResult};
 
 use super::{
-    issue::RenderingIssue, RenderData, RenderProxyIncomingMessage, RenderProxyOutgoingMessage,
-    ResponseHeaders,
+    RenderData, RenderProxyIncomingMessage, RenderProxyOutgoingMessage, ResponseHeaders,
+    issue::RenderingIssue,
 };
 use crate::{
-    get_intermediate_asset, get_renderer_pool, pool::NodeJsOperation,
+    get_intermediate_asset, get_renderer_pool_operation, pool::NodeJsOperation,
     render::error_page::error_html, source_map::trace_stack,
 };
 
 /// Renders a module as static HTML in a node.js process.
-#[turbo_tasks::function]
-pub async fn render_proxy(
-    cwd: Vc<FileSystemPath>,
-    env: Vc<Box<dyn ProcessEnv>>,
-    path: Vc<FileSystemPath>,
-    module: Vc<Box<dyn Module>>,
-    runtime_entries: Vc<EvaluatableAssets>,
-    chunking_context: Vc<Box<dyn ChunkingContext>>,
-    intermediate_output_path: Vc<FileSystemPath>,
-    output_root: Vc<FileSystemPath>,
-    project_dir: Vc<FileSystemPath>,
-    data: Vc<RenderData>,
-    body: Vc<Body>,
+#[turbo_tasks::function(operation)]
+pub async fn render_proxy_operation(
+    cwd: FileSystemPath,
+    env: ResolvedVc<Box<dyn ProcessEnv>>,
+    path: FileSystemPath,
+    module: ResolvedVc<Box<dyn EvaluatableAsset>>,
+    runtime_entries: ResolvedVc<EvaluatableAssets>,
+    chunking_context: ResolvedVc<Box<dyn ChunkingContext>>,
+    intermediate_output_path: FileSystemPath,
+    output_root: FileSystemPath,
+    project_dir: FileSystemPath,
+    data: ResolvedVc<RenderData>,
+    body: ResolvedVc<Body>,
     debug: bool,
 ) -> Result<Vc<ProxyResult>> {
     let render = render_stream(RenderStreamOptions {
@@ -94,7 +96,7 @@ pub async fn render_proxy(
 }
 
 async fn proxy_error(
-    path: Vc<FileSystemPath>,
+    path: FileSystemPath,
     error: anyhow::Error,
     operation: Option<NodeJsOperation>,
 ) -> Result<(u16, RcStr)> {
@@ -113,18 +115,18 @@ async fn proxy_error(
     let status_code = 500;
     let body = error_html(
         status_code,
-        "An error occurred while proxying the request to Node.js".into(),
+        rcstr!("An error occurred while proxying the request to Node.js"),
         format!("{message}\n\n{}", details.join("\n")).into(),
     )
-    .await?
-    .clone_value();
+    .owned()
+    .await?;
 
     RenderingIssue {
         file_path: path,
-        message: StyledString::Text(message.into()).cell(),
+        message: StyledString::Text(message.into()).resolved_cell(),
         status: status.and_then(|status| status.code()),
     }
-    .cell()
+    .resolved_cell()
     .emit();
 
     Ok((status_code, body))
@@ -148,19 +150,19 @@ struct RenderStreamSender {
 #[turbo_tasks::value(transparent)]
 struct RenderStream(#[turbo_tasks(trace_ignore)] Stream<RenderItemResult>);
 
-#[derive(Clone, Debug, TaskInput, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, TaskInput, PartialEq, Eq, Hash, Serialize, Deserialize, TraceRawVcs)]
 struct RenderStreamOptions {
-    cwd: Vc<FileSystemPath>,
-    env: Vc<Box<dyn ProcessEnv>>,
-    path: Vc<FileSystemPath>,
-    module: Vc<Box<dyn Module>>,
-    runtime_entries: Vc<EvaluatableAssets>,
-    chunking_context: Vc<Box<dyn ChunkingContext>>,
-    intermediate_output_path: Vc<FileSystemPath>,
-    output_root: Vc<FileSystemPath>,
-    project_dir: Vc<FileSystemPath>,
-    data: Vc<RenderData>,
-    body: Vc<Body>,
+    cwd: FileSystemPath,
+    env: ResolvedVc<Box<dyn ProcessEnv>>,
+    path: FileSystemPath,
+    module: ResolvedVc<Box<dyn EvaluatableAsset>>,
+    runtime_entries: ResolvedVc<EvaluatableAssets>,
+    chunking_context: ResolvedVc<Box<dyn ChunkingContext>>,
+    intermediate_output_path: FileSystemPath,
+    output_root: FileSystemPath,
+    project_dir: FileSystemPath,
+    data: ResolvedVc<RenderData>,
+    body: ResolvedVc<Body>,
     debug: bool,
 }
 
@@ -175,7 +177,9 @@ fn render_stream(options: RenderStreamOptions) -> Vc<RenderStream> {
 
     // We create a new cell in this task, which will be updated from the
     // [render_stream_internal] task.
-    let cell = turbo_tasks::macro_helpers::find_cell_by_type(*RENDERSTREAM_VALUE_TYPE_ID);
+    let cell = turbo_tasks::macro_helpers::find_cell_by_type(
+        <RenderStream as VcValueType>::get_value_type_id(),
+    );
 
     // We initialize the cell with a stream that is open, but has no values.
     // The first [render_stream_internal] pipe call will pick up that stream.
@@ -234,23 +238,23 @@ async fn render_stream_internal(
 
     let stream = generator! {
         let intermediate_asset = get_intermediate_asset(
-            chunking_context,
-            module,
-            runtime_entries,
-        );
-        let pool = get_renderer_pool(
+            *chunking_context,
+            *module,
+            *runtime_entries,
+        ).to_resolved().await?;
+        let pool_op = get_renderer_pool_operation(
             cwd,
             env,
             intermediate_asset,
-            intermediate_output_path,
+            intermediate_output_path.clone(),
             output_root,
-            project_dir,
+            project_dir.clone(),
             debug,
         );
 
         // Read this strongly consistent, since we don't want to run inconsistent
         // node.js code.
-        let pool = pool.strongly_consistent().await?;
+        let pool = pool_op.read_strongly_consistent().await?;
         let data = data.await?;
         let mut operation = pool.operation().await?;
 
@@ -278,17 +282,17 @@ async fn render_stream_internal(
                 // 500 proxy error as if it were the proper result.
                 let trace = trace_stack(
                     error,
-                    intermediate_asset,
-                    intermediate_output_path,
-                    project_dir
+                    *intermediate_asset,
+                    intermediate_output_path.clone(),
+                    project_dir.clone()
                 )
                 .await?;
                 let (status, body) =  proxy_error(path, anyhow!("error rendering: {}", trace), Some(operation)).await?;
                 yield RenderItem::Headers(ResponseHeaders {
                     status,
                     headers: vec![(
-                        "content-type".into(),
-                        "text/html; charset=utf-8".into(),
+                        rcstr!("content-type"),
+                        rcstr!("text/html; charset=utf-8"),
                     )],
                 });
                 yield RenderItem::BodyChunk(body.into_owned().into_bytes().into());
@@ -313,7 +317,7 @@ async fn render_stream_internal(
                     // headers/body to a proxy error.
                     operation.disallow_reuse();
                     let trace =
-                        trace_stack(error, intermediate_asset, intermediate_output_path, project_dir).await?;
+                        trace_stack(error, *intermediate_asset, intermediate_output_path.clone(), project_dir.clone()).await?;
                     Err(anyhow!("error during streaming render: {}", trace))?;
                     return;
                 }

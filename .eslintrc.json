@@ -2,7 +2,8 @@
   // This is the default eslint config that is used by IDEs. It does not use
   // computation-heavy type-checked rules to ensure maximum responsiveness while
   // writing code. In addition, there is .eslintrc.cli.json that does use
-  // type-checked rules, and it is used when running `pnpm lint-eslint`.
+  // type-checked rules in addition to the rules defined here, and it is used
+  // when running `pnpm lint-eslint` locally or in CI.
   "$schema": "https://json.schemastore.org/eslintrc",
   "root": true,
   "parser": "@babel/eslint-parser",
@@ -38,6 +39,7 @@
   "overrides": [
     {
       "files": ["test/**/*.js", "test/**/*.ts", "**/*.test.ts"],
+      "excludedFiles": ["test/tmp/**"],
       "extends": ["plugin:jest/recommended"],
       "rules": {
         "jest/expect-expect": "off",
@@ -45,7 +47,11 @@
         "jest/no-conditional-expect": "off",
         "jest/valid-title": "off",
         "jest/no-interpolation-in-snapshots": "off",
-        "jest/no-export": "off"
+        "jest/no-export": "off",
+        "jest/no-standalone-expect": [
+          "error",
+          { "additionalTestBlockFunctions": ["retry", "itCI", "itHeaded"] }
+        ]
       }
     },
     { "files": ["**/__tests__/**"], "env": { "jest": true } },
@@ -66,7 +72,10 @@
         "@typescript-eslint/array-type": "off",
         "@typescript-eslint/ban-ts-comment": "off",
         "@typescript-eslint/ban-tslint-comment": "off",
-        "@typescript-eslint/ban-types": "off",
+        "@typescript-eslint/no-empty-object-type": "off",
+        "@typescript-eslint/no-restricted-types": "off",
+        "@typescript-eslint/no-unsafe-function-type": "off",
+        "@typescript-eslint/no-wrapper-object-types": "off",
         "@typescript-eslint/class-literal-property-style": "off",
         "@typescript-eslint/consistent-generic-constructors": "off",
         "@typescript-eslint/consistent-indexed-object-style": "off",
@@ -77,6 +86,7 @@
         "@typescript-eslint/no-empty-interface": "off",
         "@typescript-eslint/no-explicit-any": "off",
         "@typescript-eslint/no-inferrable-types": "off",
+        "@typescript-eslint/no-require-imports": "off",
         "@typescript-eslint/no-var-requires": "off",
         "@typescript-eslint/prefer-for-of": "off",
         "@typescript-eslint/prefer-function-type": "off",
@@ -104,6 +114,7 @@
             "args": "none",
             "ignoreRestSiblings": true,
             "argsIgnorePattern": "^_",
+            "caughtErrors": "none",
             "caughtErrorsIgnorePattern": "^_",
             "destructuredArrayIgnorePattern": "^_",
             "varsIgnorePattern": "^_"
@@ -117,8 +128,10 @@
       }
     },
     {
-      "files": ["packages/**/*.tsx?"],
+      "files": ["packages/**/*.ts", "packages/**/*.tsx"],
+      "plugins": ["@next/eslint-plugin-internal"],
       "rules": {
+        "@next/internal/typechecked-require": "error",
         "jsdoc/no-types": "error",
         "jsdoc/no-undefined-types": "error"
       }
@@ -157,7 +170,8 @@
       "files": ["packages/**"],
       "excludedFiles": [
         "packages/next/taskfile*.js",
-        "packages/next/webpack.config.js"
+        "packages/next/next-devtools.webpack-config.js",
+        "packages/next/next-runtime.webpack-config.js"
       ],
       "rules": {
         "no-shadow": ["error", { "builtinGlobals": false }],
@@ -178,7 +192,9 @@
           {
             "args": "all",
             "argsIgnorePattern": "^_",
-            "ignoreRestSiblings": true
+            "caughtErrors": "none",
+            "ignoreRestSiblings": true,
+            "varsIgnorePattern": "^_"
           }
         ]
       }
@@ -217,6 +233,23 @@
           }
         ],
         "@typescript-eslint/no-import-type-side-effects": "error"
+      }
+    },
+    {
+      "files": ["*.mdx"],
+      "extends": ["plugin:mdx/recommended"],
+      "parser": "eslint-mdx",
+      "rules": {
+        "react/jsx-no-undef": "off"
+      }
+    },
+    {
+      "files": [
+        "packages/next/src/next-devtools/dev-overlay/**/*.tsx",
+        "packages/next/src/next-devtools/dev-overlay/**/*.ts"
+      ],
+      "rules": {
+        "react-hooks/react-compiler": "error"
       }
     }
   ],
@@ -275,12 +308,33 @@
     "no-octal": "error",
     "no-octal-escape": "error",
     "no-regex-spaces": "error",
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": ["*/next-devtools/dev-overlay*"],
+            "message": "Use `next/dist/compiled/next-devtools` (`src/next-devtools/dev-overlay/entrypoint.ts`) instead. Prefer `src/next-devtools/shared/` for shared utils."
+          }
+        ]
+      }
+    ],
     "no-restricted-syntax": [
       "error",
       "WithStatement",
       {
         "message": "substr() is deprecated, use slice() or substring() instead",
         "selector": "MemberExpression > Identifier[name='substr']"
+      },
+      // ban plain workUnitStore.type if statements and ternaries
+      {
+        "selector": "BinaryExpression[left.object.name='workUnitStore'][left.property.name='type'][operator=/^(?:===|!==)$/]",
+        "message": "Use an exhaustive switch on `workUnitStore.type` (with a `never`-based default) instead of using if statements or ternaries."
+      },
+      // ban optional-chained workUnitStore?.type if statements and ternaries
+      {
+        "selector": "BinaryExpression[left.type='ChainExpression'][left.expression.object.name='workUnitStore'][left.expression.property.name='type'][operator=/^(?:===|!==)$/]",
+        "message": "Use an exhaustive switch on `workUnitStore.type` (with a `never`-based default) instead of using if statements or ternaries."
       }
     ],
     "no-script-url": "error",
@@ -308,6 +362,7 @@
       "error",
       {
         "args": "none",
+        "caughtErrors": "none",
         "ignoreRestSiblings": true
       }
     ],

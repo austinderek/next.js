@@ -10,7 +10,7 @@ import { promisify } from 'util'
 import http from 'http'
 import path from 'path'
 
-import cheerio from 'cheerio'
+import type cheerio from 'cheerio'
 import spawn from 'cross-spawn'
 import { writeFile } from 'fs-extra'
 import getPort from 'get-port'
@@ -26,10 +26,13 @@ import _pkg from 'next/package.json'
 import type { SpawnOptions, ChildProcess } from 'child_process'
 import type { RequestInit, Response } from 'node-fetch'
 import type { NextServer } from 'next/dist/server/next'
-import type { BrowserInterface } from './browsers/base'
+import { Playwright } from 'next-webdriver'
 
 import { getTurbopackFlag, shouldRunTurboDevTest } from './turbo'
 import stripAnsi from 'strip-ansi'
+// TODO: Create dedicated Jest environment that sets up these matchers
+// Edge Runtime unit tests fail with "EvalError: Code generation from strings disallowed for this context" if these matchers are imported in those tests.
+import './add-redbox-matchers'
 
 export { shouldRunTurboDevTest }
 
@@ -93,12 +96,12 @@ export function initNextServerScript(
       })
     }
 
-    instance.stdout.on('data', handleStdout)
-    instance.stderr.on('data', handleStderr)
+    instance.stdout!.on('data', handleStdout)
+    instance.stderr!.on('data', handleStderr)
 
     instance.on('close', () => {
-      instance.stdout.removeListener('data', handleStdout)
-      instance.stderr.removeListener('data', handleStderr)
+      instance.stdout!.removeListener('data', handleStdout)
+      instance.stderr!.removeListener('data', handleStderr)
     })
 
     instance.on('error', (err) => {
@@ -226,8 +229,8 @@ export function runNextCommand(
   argv: string[],
   options: NextOptions = {}
 ): Promise<{
-  code: number
-  signal: NodeJS.Signals
+  code: number | null
+  signal: NodeJS.Signals | null
   stdout: string
   stderr: string
 }> {
@@ -237,7 +240,8 @@ export function runNextCommand(
   // Let Next.js decide the environment
   const env = {
     ...process.env,
-    NODE_ENV: undefined,
+    // @ts-ignore packages/next/types/global.d.ts should allow undefined NODE_ENV
+    NODE_ENV: undefined as NodeJS.ProcessEnv['NODE_ENV'],
     __NEXT_TEST_MODE: 'true',
     ...options.env,
   }
@@ -263,7 +267,7 @@ export function runNextCommand(
 
     let stderrOutput = ''
     if (options.stderr || options.onStderr) {
-      instance.stderr.on('data', function (chunk) {
+      instance.stderr!.on('data', function (chunk) {
         mergedStdio += chunk
         stderrOutput += chunk
 
@@ -275,14 +279,14 @@ export function runNextCommand(
         }
       })
     } else {
-      instance.stderr.on('data', function (chunk) {
+      instance.stderr!.on('data', function (chunk) {
         mergedStdio += chunk
       })
     }
 
     let stdoutOutput = ''
     if (options.stdout || options.onStdout) {
-      instance.stdout.on('data', function (chunk) {
+      instance.stdout!.on('data', function (chunk) {
         mergedStdio += chunk
         stdoutOutput += chunk
 
@@ -294,7 +298,7 @@ export function runNextCommand(
         }
       })
     } else {
-      instance.stdout.on('data', function (chunk) {
+      instance.stdout!.on('data', function (chunk) {
         mergedStdio += chunk
       })
     }
@@ -359,7 +363,8 @@ export function runNextCommandDev(
   const cwd = opts.cwd || nextDir
   const env = {
     ...process.env,
-    NODE_ENV: undefined,
+    // @ts-ignore packages/next/types/global.d.ts should allow undefined NODE_ENV
+    NODE_ENV: undefined as NodeJS.ProcessEnv['NODE_ENV'],
     __NEXT_TEST_MODE: 'true',
     ...opts.env,
   }
@@ -421,12 +426,12 @@ export function runNextCommandDev(
       }
     }
 
-    instance.stderr.on('data', handleStderr)
-    instance.stdout.on('data', handleStdout)
+    instance.stderr!.on('data', handleStderr)
+    instance.stdout!.on('data', handleStdout)
 
     instance.on('close', () => {
-      instance.stderr.removeListener('data', handleStderr)
-      instance.stdout.removeListener('data', handleStdout)
+      instance.stderr!.removeListener('data', handleStderr)
+      instance.stdout!.removeListener('data', handleStdout)
       if (!didResolve) {
         didResolve = true
         resolve(undefined)
@@ -456,7 +461,7 @@ export function launchApp(
       port as string,
       '--hostname',
       '::',
-    ].filter(Boolean),
+    ].filter((flag: string | undefined): flag is string => Boolean(flag)),
     undefined,
     { ...options, turbo: useTurbo }
   )
@@ -530,8 +535,8 @@ export function buildTS(
       output += chunk.toString()
     }
 
-    instance.stdout.on('data', handleData)
-    instance.stderr.on('data', handleData)
+    instance.stdout!.on('data', handleData)
+    instance.stderr!.on('data', handleData)
 
     instance.on('exit', (code) => {
       if (code) {
@@ -647,8 +652,21 @@ export async function stopApp(server: http.Server | undefined) {
   await promisify(server.close).apply(server)
 }
 
-export function waitFor(millis: number) {
-  return new Promise((resolve) => setTimeout(resolve, millis))
+export async function waitFor(
+  millisOrCondition: number | (() => boolean)
+): Promise<void> {
+  if (typeof millisOrCondition === 'number') {
+    return new Promise((resolve) => setTimeout(resolve, millisOrCondition))
+  }
+
+  return new Promise((resolve) => {
+    const interval = setInterval(() => {
+      if (millisOrCondition()) {
+        clearInterval(interval)
+        resolve()
+      }
+    }, 100)
+  })
 }
 
 export async function startStaticServer(
@@ -681,7 +699,7 @@ export async function startCleanStaticServer(dir: string) {
 
 /**
  * Check for content in 1 second intervals timing out after 30 seconds.
- *
+ * @deprecated use retry + expect instead
  * @param {() => Promise<unknown> | unknown} contentFn
  * @param {RegExp | string | number} regex
  * @param {boolean} hardError
@@ -724,7 +742,7 @@ export async function check(
 
 export class File {
   path: string
-  originalContent: string
+  originalContent: string | null
 
   constructor(path: string) {
     this.path = path
@@ -772,20 +790,7 @@ export class File {
   }
 
   restore() {
-    this.write(this.originalContent)
-  }
-}
-
-export async function evaluate(
-  browser: BrowserInterface,
-  input: string | Function
-) {
-  if (typeof input === 'function') {
-    const result = await browser.eval(input)
-    await new Promise((resolve) => setTimeout(resolve, 30))
-    return result
-  } else {
-    throw new Error(`You must pass a function to be evaluated in the browser.`)
+    this.write(this.originalContent!)
   }
 }
 
@@ -819,50 +824,41 @@ export async function retry<T>(
       await waitFor(interval)
     }
   }
+
+  throw new Error('Duration cannot be less than 0.')
 }
 
-export async function assertHasRedbox(browser: BrowserInterface) {
+export async function assertHasRedbox(browser: Playwright) {
+  const redbox = browser.locateRedbox()
   try {
-    await retry(
-      async () => {
-        const hasRedbox = await evaluate(browser, () => {
-          return Boolean(
-            [].slice
-              .call(document.querySelectorAll('nextjs-portal'))
-              .find((p) =>
-                p.shadowRoot.querySelector(
-                  '#nextjs__container_errors_label, #nextjs__container_errors_label'
-                )
-              )
-          )
-        })
-        expect(hasRedbox).toBe(true)
-      },
-      5000,
-      200
-    )
+    await redbox.waitFor({ timeout: 5000 })
   } catch (errorCause) {
-    const error = new Error('Expected Redbox but found none')
+    const error = new Error('Expected Redbox but found no visible one.')
+    Error.captureStackTrace(error, assertHasRedbox)
+    throw error
+  }
+
+  try {
+    await redbox
+      .locator('[data-nextjs-error-suspended]')
+      .waitFor({ state: 'detached', timeout: 10000 })
+  } catch (cause) {
+    const error = new Error('Redbox still had suspended content after 10s', {
+      cause,
+    })
     Error.captureStackTrace(error, assertHasRedbox)
     throw error
   }
 }
 
-export async function assertNoRedbox(browser: BrowserInterface) {
-  await waitFor(5000)
-  const hasRedbox = await evaluate(browser, () => {
-    return Boolean(
-      [].slice
-        .call(document.querySelectorAll('nextjs-portal'))
-        .find((p) =>
-          p.shadowRoot.querySelector(
-            '#nextjs__container_errors_label, #nextjs__container_errors_label'
-          )
-        )
-    )
-  })
+export async function assertNoRedbox(
+  browser: Playwright,
+  { waitInMs = 5000 }: { waitInMs?: number } = {}
+) {
+  await waitFor(waitInMs)
+  const redbox = browser.locateRedbox()
 
-  if (hasRedbox) {
+  if (await redbox.isVisible()) {
     const [redboxHeader, redboxDescription, redboxSource] = await Promise.all([
       getRedboxHeader(browser).catch(() => '<missing>'),
       getRedboxDescription(browser).catch(() => '<missing>'),
@@ -870,7 +866,7 @@ export async function assertNoRedbox(browser: BrowserInterface) {
     ])
 
     const error = new Error(
-      'Expected no Redbox but found one\n' +
+      'Expected no visible Redbox but found one\n' +
         `header: ${redboxHeader}\n` +
         `description: ${redboxDescription}\n` +
         `source: ${redboxSource}`
@@ -880,115 +876,327 @@ export async function assertNoRedbox(browser: BrowserInterface) {
   }
 }
 
-export async function hasErrorToast(
-  browser: BrowserInterface
-): Promise<boolean> {
+export async function assertNoErrorToast(browser: Playwright): Promise<void> {
+  let didOpenRedbox = false
+
+  try {
+    await browser.waitForElementByCss('[data-issues]').click()
+    didOpenRedbox = true
+  } catch {
+    // We expect this to fail.
+  }
+
+  if (didOpenRedbox) {
+    // If a redbox was opened unexpectedly, we use the `assertNoRedbox` helper
+    // to print a useful error message containing the redbox contents.
+    await assertNoRedbox(browser, {
+      // We already know the redbox is open, so we can skip waiting for it.
+      waitInMs: 0,
+    })
+  }
+}
+
+export async function hasErrorToast(browser: Playwright): Promise<boolean> {
+  return Boolean(
+    await browser.eval(() => {
+      const portal = [].slice
+        .call(document.querySelectorAll('nextjs-portal'))
+        .find((p) => p.shadowRoot.querySelector('[data-issues]'))
+
+      const root = portal?.shadowRoot
+      const node = root?.querySelector('[data-issues-count]')
+      return !!node
+    })
+  )
+}
+
+export async function getToastErrorCount(browser: Playwright): Promise<number> {
+  return parseInt(
+    (await browser.eval(() => {
+      const portal = [].slice
+        .call(document.querySelectorAll('nextjs-portal'))
+        .find((p) => p.shadowRoot.querySelector('[data-issues]'))
+
+      const root = portal?.shadowRoot
+      const node = root?.querySelector('[data-issues-count]')
+      return node?.innerText || '0'
+    })) ?? '0'
+  )
+}
+
+/**
+ * Has retried version of {@link hasErrorToast} built-in.
+ * Success implies {@link assertHasRedbox}.
+ */
+export async function openRedbox(browser: Playwright): Promise<void> {
+  const redbox = browser.locateRedbox()
+  if (await redbox.isVisible()) {
+    const error = new Error(
+      'Redbox is already open. Use `assertHasRedbox` instead.'
+    )
+    Error.captureStackTrace(error, openRedbox)
+    throw error
+  }
+
+  try {
+    await browser.waitForElementByCss('[data-issues]').click()
+  } catch (cause) {
+    const error = new Error('Redbox did not open.')
+    Error.captureStackTrace(error, openRedbox)
+    throw error
+  }
+  await assertHasRedbox(browser)
+}
+
+export async function openDevToolsIndicatorPopover(
+  browser: Playwright
+): Promise<void> {
+  const devToolsIndicator = await assertHasDevToolsIndicator(browser)
+
+  try {
+    await devToolsIndicator.click()
+  } catch (cause) {
+    const error = new Error('No DevTools Indicator to open.', { cause })
+    Error.captureStackTrace(error, openDevToolsIndicatorPopover)
+    throw error
+  }
+}
+
+export async function getSegmentExplorerRoute(browser: Playwright) {
+  return await browser
+    .elementByCss('.segment-explorer-page-route-bar-path')
+    .text()
+}
+
+export async function getSegmentExplorerContent(browser: Playwright) {
+  // open the devtool button
+  await openDevToolsIndicatorPopover(browser)
+
+  // open the segment explorer
+  await browser.elementByCss('[data-segment-explorer]').click()
+
+  //  wait for the segment explorer to be visible
+  await browser.waitForElementByCss('[data-nextjs-devtool-segment-explorer]')
+
+  const rows = await browser.elementsByCss('.segment-explorer-item')
+  let result: string[] = []
+  for (const row of rows) {
+    // query filename of row: segment-explorer-filename
+    const segment = (
+      (await (await row.$('.segment-explorer-filename--path'))?.innerText()) ||
+      ''
+    ).trim()
+    const files = (
+      (await (await row.$('.segment-explorer-files'))?.innerText()) || ''
+    )
+      .split(/\n+/)
+      .map((file) => file.trim())
+
+    // line format: segment [files]
+    result.push(`${segment} [${files.join(', ')}]`)
+  }
+  return result.join('\n')
+}
+
+export async function hasDevToolsPanel(browser: Playwright) {
+  const result = await browser.eval(() => {
+    const portal = document.querySelector('nextjs-portal')
+    return (
+      portal?.shadowRoot?.querySelector('[data-nextjs-dialog-overlay]') != null
+    )
+  })
+  return result
+}
+
+export async function assertHasDevToolsIndicator(browser: Playwright) {
+  const devToolsIndicator = browser.locateDevToolsIndicator()
+  try {
+    await devToolsIndicator.waitFor({ timeout: 5000 })
+  } catch (errorCause) {
+    const error = new Error(
+      'Expected DevTools Indicator but found no visible one.'
+    )
+    Error.captureStackTrace(error, assertHasDevToolsIndicator)
+    throw error
+  }
+
+  return devToolsIndicator
+}
+
+export async function assertNoDevToolsIndicator(browser: Playwright) {
+  const devToolsIndicator = browser.locateDevToolsIndicator()
+
+  if (await devToolsIndicator.isVisible()) {
+    const error = new Error(
+      'Expected no visible DevTools Indicator but found one.'
+    )
+    Error.captureStackTrace(error, assertNoDevToolsIndicator)
+    throw error
+  }
+}
+
+export async function getRouteTypeFromDevToolsIndicator(
+  browser: Playwright
+): Promise<'Static' | 'Dynamic'> {
+  await openDevToolsIndicatorPopover(browser)
+
   return browser.eval(() => {
-    return Boolean(
-      Array.from(document.querySelectorAll('nextjs-portal')).find((p) =>
-        p.shadowRoot.querySelector('[data-nextjs-toast]')
+    const portal = [].slice
+      .call(document.querySelectorAll('nextjs-portal'))
+      .find((p) => p.shadowRoot.querySelector('[data-nextjs-toast]'))
+
+    const root = portal?.shadowRoot
+
+    // 'Route\nStatic' || 'Route\nDynamic'
+    const routeTypeText = root?.querySelector(
+      '[data-nextjs-route-type]'
+    )?.innerText
+
+    if (!routeTypeText) {
+      throw new Error('No Route Type Text Found')
+    }
+
+    // 'Static' || 'Dynamic'
+    const routeType = routeTypeText.split('\n').pop()
+    if (routeType !== 'Static' && routeType !== 'Dynamic') {
+      throw new Error(`Invalid Route Type: ${routeType}`)
+    }
+
+    return routeType as 'Static' | 'Dynamic'
+  })
+}
+
+export function getRedboxHeader(browser: Playwright): Promise<string | null> {
+  return browser.eval(() => {
+    const portal = [].slice
+      .call(document.querySelectorAll('nextjs-portal'))
+      .find((p) => p.shadowRoot.querySelector('[data-nextjs-dialog-header]'))
+    const root = portal?.shadowRoot
+    return root?.querySelector('[data-nextjs-dialog-header]')?.innerText ?? null
+  })
+}
+
+export async function getRedboxTotalErrorCount(
+  browser: Playwright
+): Promise<number> {
+  const text = await browser.eval(() => {
+    const portal = [].slice
+      .call(document.querySelectorAll('nextjs-portal'))
+      .find((p) =>
+        p.shadowRoot.querySelector('[data-nextjs-dialog-header-total-count]')
       )
+
+    const root = portal?.shadowRoot
+    return root?.querySelector('[data-nextjs-dialog-header-total-count]')
+      ?.innerText
+  })
+  return parseInt(text || '-1')
+}
+
+export function getRedboxSource(browser: Playwright): Promise<string | null> {
+  return browser.eval(() => {
+    const portal = [].slice
+      .call(document.querySelectorAll('nextjs-portal'))
+      .find((p) =>
+        p.shadowRoot.querySelector(
+          '#nextjs__container_errors_label, #nextjs__container_errors_label'
+        )
+      )
+    const root = portal.shadowRoot
+    return (
+      root.querySelector('[data-nextjs-codeframe], [data-nextjs-terminal]')
+        ?.innerText ?? null
     )
   })
 }
 
-export async function waitForAndOpenRuntimeError(browser: BrowserInterface) {
-  return browser.waitForElementByCss('[data-nextjs-toast]').click()
+export function getRedboxTitle(browser: Playwright): Promise<string | null> {
+  return browser.eval(() => {
+    const portal = [].slice
+      .call(document.querySelectorAll('nextjs-portal'))
+      .find((p) => p.shadowRoot.querySelector('[data-nextjs-dialog-header]'))
+    const root = portal.shadowRoot
+    return (
+      root.querySelector(
+        '[data-nextjs-dialog-header] .nextjs__container_errors__error_title'
+      )?.innerText ?? null
+    )
+  })
 }
 
-export async function getRedboxHeader(browser: BrowserInterface) {
-  return retry(
-    () => {
-      return evaluate(browser, () => {
-        const portal = [].slice
-          .call(document.querySelectorAll('nextjs-portal'))
-          .find((p) =>
-            p.shadowRoot.querySelector('[data-nextjs-dialog-header]')
-          )
-        const root = portal?.shadowRoot
-        return root?.querySelector('[data-nextjs-dialog-header]')?.innerText
-      })
-    },
-    10000,
-    500,
-    'getRedboxHeader'
+export function getRedboxLabel(browser: Playwright): Promise<string | null> {
+  return browser.eval(() => {
+    const portal = [].slice
+      .call(document.querySelectorAll('nextjs-portal'))
+      .find((p) => p.shadowRoot.querySelector('[data-nextjs-dialog-header]'))
+    const root = portal.shadowRoot
+    return (
+      root.querySelector('#nextjs__container_errors_label')?.innerText ?? null
+    )
+  })
+}
+
+export function getRedboxEnvironmentLabel(
+  browser: Playwright
+): Promise<string | null> {
+  return browser.eval(() => {
+    const portal = [].slice
+      .call(document.querySelectorAll('nextjs-portal'))
+      .find((p) => p.shadowRoot.querySelector('[data-nextjs-dialog-header]'))
+    const root = portal.shadowRoot
+    return (
+      root.querySelector('[data-nextjs-environment-name-label]')?.innerText ??
+      null
+    )
+  })
+}
+
+export function getRedboxDescription(
+  browser: Playwright
+): Promise<string | null> {
+  return browser.eval(() => {
+    const portal = [].slice
+      .call(document.querySelectorAll('nextjs-portal'))
+      .find((p) => p.shadowRoot.querySelector('[data-nextjs-dialog-header]'))
+    const root = portal.shadowRoot
+    return (
+      root.querySelector('#nextjs__container_errors_desc')?.innerText ?? null
+    )
+  })
+}
+
+export function getRedboxDescriptionWarning(
+  browser: Playwright
+): Promise<string | null> {
+  return browser.eval(() => {
+    const portal = [].slice
+      .call(document.querySelectorAll('nextjs-portal'))
+      .find((p) => p.shadowRoot.querySelector('[data-nextjs-dialog-header]'))
+    const root = portal.shadowRoot
+    return (
+      root.querySelector('#nextjs__container_errors__notes')?.innerText ?? null
+    )
+  })
+}
+
+export function getRedboxErrorLink(
+  browser: Playwright
+): Promise<string | null> {
+  return browser.eval(() => {
+    const portal = [].slice
+      .call(document.querySelectorAll('nextjs-portal'))
+      .find((p) => p.shadowRoot.querySelector('[data-nextjs-dialog-header]'))
+    const root = portal.shadowRoot
+    return (
+      root.querySelector('#nextjs__container_errors__link')?.innerText ?? null
+    )
+  })
+}
+
+export function getBrowserBodyText(browser: Playwright) {
+  return browser.eval<string>(
+    'document.getElementsByTagName("body")[0].innerText'
   )
-}
-
-export async function getRedboxTotalErrorCount(browser: BrowserInterface) {
-  return parseInt(
-    (await getRedboxHeader(browser)).match(/\d+ of (\d+) error/)?.[1],
-    10
-  )
-}
-
-export async function getRedboxSource(browser: BrowserInterface) {
-  return retry(
-    () =>
-      evaluate(browser, () => {
-        const portal = [].slice
-          .call(document.querySelectorAll('nextjs-portal'))
-          .find((p) =>
-            p.shadowRoot.querySelector(
-              '#nextjs__container_errors_label, #nextjs__container_errors_label'
-            )
-          )
-        const root = portal.shadowRoot
-        return root.querySelector(
-          '[data-nextjs-codeframe], [data-nextjs-terminal]'
-        ).innerText
-      }),
-    10000,
-    500,
-    'getRedboxSource'
-  )
-}
-
-export async function getRedboxDescription(browser: BrowserInterface) {
-  return retry(
-    () =>
-      evaluate(browser, () => {
-        const portal = [].slice
-          .call(document.querySelectorAll('nextjs-portal'))
-          .find((p) =>
-            p.shadowRoot.querySelector('[data-nextjs-dialog-header]')
-          )
-        const root = portal.shadowRoot
-        const text = root.querySelector(
-          '#nextjs__container_errors_desc'
-        ).innerText
-        if (text === null) throw new Error('No redbox description found')
-        return text
-      }),
-    3000,
-    500,
-    'getRedboxDescription'
-  )
-}
-
-export async function getRedboxDescriptionWarning(browser: BrowserInterface) {
-  return retry(
-    () =>
-      evaluate(browser, () => {
-        const portal = [].slice
-          .call(document.querySelectorAll('nextjs-portal'))
-          .find((p) =>
-            p.shadowRoot.querySelector('[data-nextjs-dialog-header]')
-          )
-        const root = portal.shadowRoot
-        const text = root.querySelector(
-          '#nextjs__container_errors__notes'
-        )?.innerText
-        return text
-      }),
-    3000,
-    500,
-    'getRedboxDescriptionWarning'
-  )
-}
-
-export function getBrowserBodyText(browser: BrowserInterface) {
-  return browser.eval('document.getElementsByTagName("body")[0].innerText')
 }
 
 export function normalizeRegEx(src: string) {
@@ -1001,6 +1209,10 @@ function readJson(path: string) {
 
 export function getBuildManifest(dir: string) {
   return readJson(path.join(dir, '.next/build-manifest.json'))
+}
+
+export function getImagesManifest(dir: string) {
+  return readJson(path.join(dir, '.next/images-manifest.json'))
 }
 
 export function getPageFilesFromBuildManifest(dir: string, page: string) {
@@ -1029,7 +1241,7 @@ export function getPageFileFromBuildManifest(dir: string, page: string) {
 
   const pageFile = pageFiles[pageFiles.length - 1]
   expect(pageFile).toEndWith('.js')
-  if (!process.env.TURBOPACK) {
+  if (!process.env.IS_TURBOPACK_TEST) {
     expect(pageFile).toInclude(`pages${page === '' ? '/index' : page}`)
   }
   if (!pageFile) {
@@ -1071,13 +1283,42 @@ export function readNextBuildServerPageFile(appDir: string, page: string) {
   return readFileSync(path.join(appDir, '.next', 'server', pageFile), 'utf8')
 }
 
+export function getClientBuildManifest(dir: string) {
+  let buildId = readFileSync(path.join(dir, '.next/BUILD_ID'), 'utf8')
+  let code = readFileSync(
+    path.join(dir, '.next/static', buildId, '_buildManifest.js'),
+    'utf8'
+  )
+  // eslint-disable-next-line no-eval
+  let manifest = (0, eval)(`var self = global;${code};self.__BUILD_MANIFEST`)
+  return manifest
+}
+
+export function getClientBuildManifestLoaderChunkUrlPath(
+  dir: string,
+  page: string
+) {
+  let manifest = getClientBuildManifest(dir)
+  let chunk: string[] | undefined = manifest[page]
+  if (chunk == null) {
+    throw new Error(`Couldn't find page "${page}" in _buildManifest.js`)
+  }
+  if (chunk.length !== 1) {
+    throw new Error(
+      `Expected a single chunk, but found ${chunk.length} for "${page}" in _buildManifest.js`
+    )
+  }
+  // Remove leading './' so that this can be used in a `url.contains(chunk)` check.
+  return encodeURI(chunk[0].replace(/^\.\//, ''))
+}
+
 function runSuite(
   suiteName: string,
   context: { env: 'prod' | 'dev'; appDir: string } & Partial<{
     stderr: string
     stdout: string
     appPort: number
-    code: number
+    code: number | null
     server: ChildProcess
   }>,
   options: {
@@ -1176,7 +1417,7 @@ export function findAllTelemetryEvents(output: string, eventName: string) {
   const regex = /\[telemetry\] ({.+?^})/gms
   // Pop the last element of each entry to retrieve contents of the capturing group
   const events = [...output.matchAll(regex)].map((entry) =>
-    JSON.parse(entry.pop())
+    JSON.parse(entry.pop()!)
   )
   return events.filter((e) => e.eventName === eventName).map((e) => e.payload)
 }
@@ -1202,17 +1443,19 @@ export function getSnapshotTestDescribe(variant: TestVariants) {
   return shouldSkip ? describe.skip : describe
 }
 
+/**
+ * @returns `null` if there are no frames
+ */
 export async function getRedboxComponentStack(
-  browser: BrowserInterface
-): Promise<string> {
-  await browser.waitForElementByCss(
-    '[data-nextjs-container-errors-pseudo-html] code',
-    30000
-  )
-  // TODO: the type for elementsByCss is incorrect
-  const componentStackFrameElements: any = await browser.elementsByCss(
+  browser: Playwright
+): Promise<string | null> {
+  const componentStackFrameElements = await browser.elementsByCss(
     '[data-nextjs-container-errors-pseudo-html] code'
   )
+  if (componentStackFrameElements.length === 0) {
+    return null
+  }
+
   const componentStackFrameTexts = await Promise.all(
     componentStackFrameElements.map((f) => f.innerText())
   )
@@ -1220,40 +1463,84 @@ export async function getRedboxComponentStack(
   return componentStackFrameTexts.join('\n').trim()
 }
 
-export async function toggleCollapseComponentStack(
-  browser: BrowserInterface
-): Promise<void> {
-  await browser
-    .elementByCss('[data-nextjs-container-errors-pseudo-html-collapse]')
-    .click()
-}
+export async function hasRedboxCallStack(browser: Playwright) {
+  return browser.eval(() => {
+    const portal = [].slice
+      .call(document.querySelectorAll('nextjs-portal'))
+      .find((p) => p.shadowRoot.querySelector('[data-nextjs-dialog-body]'))
+    const root = portal?.shadowRoot
 
-export async function expandCallStack(
-  browser: BrowserInterface
-): Promise<void> {
-  // Open full Call Stack
-  await browser
-    .elementByCss('[data-nextjs-data-runtime-error-collapsed-action]')
-    .click()
+    return root?.querySelectorAll('[data-nextjs-call-stack-frame]').length > 0
+  })
 }
 
 export async function getRedboxCallStack(
-  browser: BrowserInterface
-): Promise<string> {
-  await browser.waitForElementByCss('[data-nextjs-call-stack-frame]', 30000)
+  browser: Playwright
+): Promise<string[] | null> {
+  return browser.eval(() => {
+    const portal = [].slice
+      .call(document.querySelectorAll('nextjs-portal'))
+      .find((p) => p.shadowRoot.querySelector('[data-nextjs-call-stack-frame]'))
+    const root = portal?.shadowRoot
+    const frameElements = root?.querySelectorAll(
+      '[data-nextjs-call-stack-frame]'
+    )
 
-  const callStackFrameElements: any = await browser.elementsByCss(
-    '[data-nextjs-call-stack-frame]'
+    const stack: string[] = []
+    if (frameElements !== undefined) {
+      let foundInternalFrame = false
+      for (const frameElement of frameElements) {
+        // `innerText` will be "${methodName}\n${location}".
+        // Ideally `innerText` would be "${methodName} ${location}"
+        // so that c&p automatically does the right thing.
+        const frame = frameElement.innerText.replace('\n', ' ')
+
+        // TODO: Special marker if source-mapping fails.
+
+        // Feel free to adjust this heuristic if it accidentally hides too much.
+        const isInternalFrame =
+          // likely https://linear.app/vercel/issue/NDX-464
+          // location starts with `./dist` e.g. "NotFoundBoundary ./dist/esm/[...]"
+          / .\/dist\//.test(frame)
+
+        if (isInternalFrame) {
+          // We only add one of these frames.
+          // If we'd add all of them, the stack would change during refactorings which is annoying.
+          if (!foundInternalFrame) {
+            stack.push('<FIXME-internal-frame>')
+          }
+          foundInternalFrame = true
+        } else if (frame.includes('file://')) {
+          stack.push('<FIXME-file-protocol>')
+        } else if (frame.includes('.next/')) {
+          stack.push('<FIXME-next-dist-dir>')
+        } else {
+          stack.push(frame)
+        }
+      }
+    }
+
+    return stack
+  })
+}
+
+export async function getRedboxCallStackCollapsed(
+  browser: Playwright
+): Promise<string> {
+  const callStackFrameElements = await browser.elementsByCss(
+    '.nextjs-container-errors-body > [data-nextjs-codeframe] > :first-child, ' +
+      '.nextjs-container-errors-body > [data-nextjs-call-stack-frame], ' +
+      '.nextjs-container-errors-body > [data-nextjs-collapsed-call-stack-details] > summary'
   )
   const callStackFrameTexts = await Promise.all(
     callStackFrameElements.map((f) => f.innerText())
   )
 
-  return callStackFrameTexts.join('\n').trim()
+  return callStackFrameTexts.join('\n---\n').trim()
 }
 
 export async function getVersionCheckerText(
-  browser: BrowserInterface
+  browser: Playwright
 ): Promise<string> {
   await browser.waitForElementByCss('[data-nextjs-version-checker]', 30000)
   const versionCheckerElement = await browser.elementByCss(
@@ -1283,7 +1570,7 @@ export function colorToRgb(color) {
 }
 
 export function getUrlFromBackgroundImage(backgroundImage: string) {
-  const matches = backgroundImage.match(/url\("[^)]+"\)/g).map((match) => {
+  const matches = backgroundImage.match(/url\("[^)]+"\)/g)!.map((match) => {
     // Extract the URL part from each match. The match includes 'url("' and '"")', so we remove those.
     return match.slice(5, -2)
   })
@@ -1291,40 +1578,18 @@ export function getUrlFromBackgroundImage(backgroundImage: string) {
   return matches
 }
 
-/**
- * For better editor support, pass in the variants this should run on (`default` and/or `turbo`) as cases.
- *
- * This is necessary if separate snapshots are needed for next.js with webpack vs turbopack.
- */
-export const describeVariants = {
-  each(variants: TestVariants[]) {
-    return (name: string, fn: (variants: TestVariants) => any) => {
-      if (
-        !Array.isArray(variants) ||
-        !variants.every((val) => typeof val === 'string')
-      ) {
-        throw new Error('variants need to be an array of strings')
-      }
-
-      for (const variant of variants) {
-        getSnapshotTestDescribe(variant).each([variant])(name, fn)
-      }
-    }
-  },
-}
-
-export const getTitle = (browser: BrowserInterface) =>
+export const getTitle = (browser: Playwright) =>
   browser.elementByCss('title').text()
 
 async function checkMeta(
-  browser: BrowserInterface,
+  browser: Playwright,
   queryValue: string,
   expected: RegExp | string | string[] | undefined | null,
   queryKey: string = 'property',
   tag: string = 'meta',
   domAttributeField: string = 'content'
 ) {
-  const values = await browser.eval(
+  const values = await browser.eval<(string | null)[]>(
     `[...document.querySelectorAll('${tag}[${queryKey}="${queryValue}"]')].map((el) => el.getAttribute("${domAttributeField}"))`
   )
   if (expected instanceof RegExp) {
@@ -1344,7 +1609,7 @@ async function checkMeta(
   }
 }
 
-export function createDomMatcher(browser: BrowserInterface) {
+export function createDomMatcher(browser: Playwright) {
   /**
    * @param tag - tag name, e.g. 'meta'
    * @param query - query string, e.g. 'name="description"'
@@ -1410,7 +1675,7 @@ export function createMultiHtmlMatcher($: ReturnType<typeof cheerio.load>) {
   }
 }
 
-export function createMultiDomMatcher(browser: BrowserInterface) {
+export function createMultiDomMatcher(browser: Playwright) {
   /**
    * @param tag - tag name, e.g. 'meta'
    * @param queryKey - query key, e.g. 'property'
@@ -1449,13 +1714,119 @@ export function createMultiDomMatcher(browser: BrowserInterface) {
 }
 
 export const checkMetaNameContentPair = (
-  browser: BrowserInterface,
+  browser: Playwright,
   name: string,
   content: string | string[]
 ) => checkMeta(browser, name, content, 'name')
 
 export const checkLink = (
-  browser: BrowserInterface,
+  browser: Playwright,
   rel: string,
   content: string | string[]
 ) => checkMeta(browser, rel, content, 'rel', 'link', 'href')
+
+export async function getStackFramesContent(browser) {
+  const stackFrameElements = await browser.elementsByCss(
+    '[data-nextjs-call-stack-frame]'
+  )
+  const stackFramesContent = (
+    await Promise.all(
+      stackFrameElements.map(async (frame) => {
+        const functionNameEl = await frame.$('.call-stack-frame-method-name')
+        const sourceEl = await frame.$('[data-has-source="true"]')
+        const functionName = functionNameEl
+          ? await functionNameEl.innerText()
+          : ''
+        const source = sourceEl ? await sourceEl.innerText() : ''
+
+        if (!functionName) {
+          return ''
+        }
+        return `at ${functionName} (${source})`
+      })
+    )
+  )
+    .filter(Boolean)
+    .join('\n')
+
+  return stackFramesContent
+}
+
+export async function toggleCollapseCallStackFrames(browser: Playwright) {
+  const button = await browser.elementByCss(
+    '[data-nextjs-call-stack-ignored-list-toggle-button]'
+  )
+  const lastExpanded = await button.getAttribute(
+    'data-nextjs-call-stack-ignored-list-toggle-button'
+  )
+  await button.click()
+
+  await retry(async () => {
+    const currExpanded = await button.getAttribute(
+      'data-nextjs-call-stack-ignored-list-toggle-button'
+    )
+    expect(currExpanded).not.toBe(lastExpanded)
+  })
+}
+
+/**
+ * Encodes the params into a URLSearchParams object using the format that the
+ * now builder uses for route matches (adding the `nxtP` prefix to the keys).
+ *
+ * @param params - The params to encode.
+ * @param extraQueryParams - The extra query params to encode (without the `nxtP` prefix).
+ * @returns The encoded URLSearchParams object.
+ */
+export function createNowRouteMatches(
+  params: Record<string, string>,
+  extraQueryParams: Record<string, string> = {}
+): URLSearchParams {
+  const urlSearchParams = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    urlSearchParams.append(`nxtP${key}`, value)
+  }
+  for (const [key, value] of Object.entries(extraQueryParams)) {
+    urlSearchParams.append(key, value)
+  }
+
+  return urlSearchParams
+}
+
+export async function assertNoConsoleErrors(browser: Playwright) {
+  const logs = await browser.log()
+  const warningsAndErrors = logs.filter((log) => {
+    return (
+      log.source === 'warning' ||
+      (log.source === 'error' &&
+        // These are expected when we visit 404 pages.
+        !log.message.startsWith(
+          'Failed to load resource: the server responded with a status of 404'
+        ))
+    )
+  })
+
+  expect(warningsAndErrors).toEqual([])
+}
+
+export async function getHighlightedDiffLines(
+  browser: Playwright
+): Promise<[string, string][]> {
+  const lines = await browser.elementsByCss(
+    '[data-nextjs-container-errors-pseudo-html--diff]'
+  )
+  return Promise.all(
+    lines.map(async (line) => [
+      (await line.getAttribute(
+        'data-nextjs-container-errors-pseudo-html--diff'
+      ))!,
+      (await line.innerText())[0],
+    ])
+  )
+}
+
+export function trimEndMultiline(str: string) {
+  return str
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+}

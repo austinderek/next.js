@@ -5,11 +5,12 @@ import {
   getPageStaticInfo,
   type MiddlewareMatcher,
 } from '../../../build/analysis/get-page-static-info'
+import type { RoutesManifest } from '../../../build'
 import type { MiddlewareRouteMatch } from '../../../shared/lib/router/utils/middleware-route-matcher'
 import type { PropagateToWorkersField } from './types'
 import type { NextJsHotReloaderInterface } from '../../dev/hot-reloader-types'
 
-import { createDefineEnv, type Project } from '../../../build/swc'
+import { createDefineEnv } from '../../../build/swc'
 import fs from 'fs'
 import { mkdir } from 'fs/promises'
 import url from 'url'
@@ -17,7 +18,6 @@ import path from 'path'
 import qs from 'querystring'
 import Watchpack from 'next/dist/compiled/watchpack'
 import { loadEnvConfig } from '@next/env'
-import isError, { type NextError } from '../../../lib/is-error'
 import findUp from 'next/dist/compiled/find-up'
 import { buildCustomRoute } from './filesystem'
 import * as Log from '../../../build/output/log'
@@ -27,9 +27,10 @@ import type { Telemetry } from '../../../telemetry/storage'
 import type { IncomingMessage, ServerResponse } from 'http'
 import loadJsConfig from '../../../build/load-jsconfig'
 import { createValidFileMatcher } from '../find-page-file'
-import { eventCliSession } from '../../../telemetry/events'
-import { getDefineEnv } from '../../../build/webpack/plugins/define-env-plugin'
-import { logAppDirError } from '../../dev/log-app-dir-error'
+import {
+  EVENT_BUILD_FEATURE_USAGE,
+  eventCliSession,
+} from '../../../telemetry/events'
 import { getSortedRoutes } from '../../../shared/lib/router/utils'
 import {
   getStaticInfoIncludingLayouts,
@@ -48,10 +49,12 @@ import { generateInterceptionRoutesRewrites } from '../../../lib/generate-interc
 
 import {
   CLIENT_STATIC_FILES_PATH,
-  COMPILER_NAMES,
   DEV_CLIENT_PAGES_MANIFEST,
   DEV_CLIENT_MIDDLEWARE_MANIFEST,
   PHASE_DEVELOPMENT_SERVER,
+  TURBOPACK_CLIENT_MIDDLEWARE_MANIFEST,
+  ROUTES_MANIFEST,
+  PRERENDER_MANIFEST,
 } from '../../../shared/lib/constants'
 
 import { getMiddlewareRouteMatcher } from '../../../shared/lib/router/utils/middleware-route-matcher'
@@ -63,32 +66,27 @@ import {
   getPossibleMiddlewareFilenames,
   getPossibleInstrumentationHookFilenames,
 } from '../../../build/utils'
-import {
-  createOriginalStackFrame,
-  getSourceById,
-  parseStack,
-} from '../../../client/components/react-dev-overlay/server/middleware'
-import {
-  batchedTraceSource,
-  createOriginalStackFrame as createOriginalTurboStackFrame,
-} from '../../../client/components/react-dev-overlay/server/middleware-turbopack'
 import { devPageFiles } from '../../../build/webpack/plugins/next-types-plugin/shared'
 import type { LazyRenderServerInstance } from '../router-server'
 import { HMR_ACTIONS_SENT_TO_BROWSER } from '../../dev/hot-reloader-types'
 import { PAGE_TYPES } from '../../../lib/page-types'
 import { createHotReloaderTurbopack } from '../../dev/hot-reloader-turbopack'
-import { getErrorSource } from '../../../shared/lib/error-source'
-import type { StackFrame } from 'next/dist/compiled/stacktrace-parser'
-import { generateEncryptionKeyBase64 } from '../../app-render/encryption-utils'
-import {
-  ModuleBuildError,
-  TurbopackInternalError,
-} from '../../dev/turbopack-utils'
-import { isMetadataRoute } from '../../../lib/metadata/is-metadata-route'
+import { generateEncryptionKeyBase64 } from '../../app-render/encryption-utils-server'
+import { isMetadataRouteFile } from '../../../lib/metadata/is-metadata-route'
 import { normalizeMetadataPageToRoute } from '../../../lib/metadata/get-metadata-route'
 import { createEnvDefinitions } from '../experimental/create-env-definitions'
 import { JsConfigPathsPlugin } from '../../../build/webpack/plugins/jsconfig-paths-plugin'
 import { store as consoleStore } from '../../../build/output/store'
+import {
+  isPersistentCachingEnabled,
+  ModuleBuildError,
+} from '../../../shared/lib/turbopack/utils'
+import { getDefineEnv } from '../../../build/define-env'
+import { TurbopackInternalError } from '../../../shared/lib/turbopack/internal-error'
+import { normalizePath } from '../../../lib/normalize-path'
+import { JSON_CONTENT_TYPE_HEADER } from '../../../lib/constants'
+import { parseBody } from '../../api-utils/node/parse-body'
+import { timingSafeEqual } from 'crypto'
 
 export type SetupOpts = {
   renderServer: LazyRenderServerInstance
@@ -103,8 +101,19 @@ export type SetupOpts = {
   >
   nextConfig: NextConfigComplete
   port: number
-  onCleanup: (listener: () => Promise<void>) => void
+  onDevServerCleanup: ((listener: () => Promise<void>) => void) | undefined
   resetFetch: () => void
+}
+
+export interface DevRoutesManifest {
+  version: number
+  caseSensitive: RoutesManifest['caseSensitive']
+  basePath: RoutesManifest['basePath']
+  rewrites: RoutesManifest['rewrites']
+  redirects: RoutesManifest['redirects']
+  headers: RoutesManifest['headers']
+  i18n: RoutesManifest['i18n']
+  skipMiddlewareUrlNormalize: RoutesManifest['skipMiddlewareUrlNormalize']
 }
 
 export type ServerFields = {
@@ -122,7 +131,7 @@ export type ServerFields = {
   interceptionRoutes?: ReturnType<
     typeof import('./filesystem').buildCustomRoute
   >[]
-  setAppIsrStatus?: (key: string, value: false | number | null) => void
+  setIsrStatus?: (key: string, value: boolean) => void
   resetFetch?: () => void
 }
 
@@ -153,7 +162,11 @@ export async function propagateServerField(
   await opts.renderServer?.instance?.propagateServerField(opts.dir, field, args)
 }
 
-async function startWatcher(opts: SetupOpts) {
+async function startWatcher(
+  opts: SetupOpts & {
+    isSrcDir: boolean
+  }
+) {
   const { nextConfig, appDir, pagesDir, dir, resetFetch } = opts
   const { useFileSystemPublicRoutes } = nextConfig
   const usingTypeScript = await verifyTypeScript(opts)
@@ -186,12 +199,16 @@ async function startWatcher(opts: SetupOpts) {
   const hotReloader: NextJsHotReloaderInterface = opts.turbo
     ? await createHotReloaderTurbopack(opts, serverFields, distDir, resetFetch)
     : new HotReloaderWebpack(opts.dir, {
+        isSrcDir: opts.isSrcDir,
         appDir,
         pagesDir,
-        distDir: distDir,
+        distDir,
         config: opts.nextConfig,
         buildId: 'development',
-        encryptionKey: await generateEncryptionKeyBase64(),
+        encryptionKey: await generateEncryptionKeyBase64({
+          isBuild: false,
+          distDir,
+        }),
         telemetry: opts.telemetry,
         rewrites: opts.fsChecker.rewrites,
         previewProps: opts.fsChecker.prerenderManifest.preview,
@@ -199,6 +216,30 @@ async function startWatcher(opts: SetupOpts) {
       })
 
   await hotReloader.start()
+
+  // have to write this after starting hot-reloader since that
+  // cleans the dist dir
+  const routesManifestPath = path.join(distDir, ROUTES_MANIFEST)
+  const routesManifest: DevRoutesManifest = {
+    version: 3,
+    caseSensitive: !!nextConfig.experimental.caseSensitiveRoutes,
+    basePath: nextConfig.basePath,
+    rewrites: opts.fsChecker.rewrites,
+    redirects: opts.fsChecker.redirects,
+    headers: opts.fsChecker.headers,
+    i18n: nextConfig.i18n || undefined,
+    skipMiddlewareUrlNormalize: nextConfig.skipMiddlewareUrlNormalize,
+  }
+  await fs.promises.writeFile(
+    routesManifestPath,
+    JSON.stringify(routesManifest)
+  )
+
+  const prerenderManifestPath = path.join(distDir, PRERENDER_MANIFEST)
+  await fs.promises.writeFile(
+    prerenderManifestPath,
+    JSON.stringify(opts.fsChecker.prerenderManifest, null, 2)
+  )
 
   if (opts.nextConfig.experimental.nextScriptWorkers) {
     await verifyPartytownSetup(
@@ -424,7 +465,15 @@ async function startWatcher(opts: SetupOpts) {
           pagesType: isAppPath ? PAGE_TYPES.APP : PAGE_TYPES.PAGES,
         })
 
-        if (isAppPath && isMetadataRoute(pageName)) {
+        if (
+          isAppPath &&
+          appDir &&
+          isMetadataRouteFile(
+            fileName.replace(appDir, ''),
+            nextConfig.pageExtensions,
+            true
+          )
+        ) {
           const staticInfo = await getPageStaticInfo({
             pageFilePath: fileName,
             nextConfig: {},
@@ -470,7 +519,12 @@ async function startWatcher(opts: SetupOpts) {
           if (!appPaths[pageName]) {
             appPaths[pageName] = []
           }
-          appPaths[pageName].push(originalPageName)
+          appPaths[pageName].push(
+            opts.turbo
+              ? // Turbopack outputs the correct path which is normalized with the `_`.
+                originalPageName.replace(/%5F/g, '_')
+              : originalPageName
+          )
 
           if (useFileSystemPublicRoutes) {
             appFiles.add(pageName)
@@ -567,9 +621,9 @@ async function startWatcher(opts: SetupOpts) {
 
       if (envChange || tsconfigChange) {
         if (envChange) {
-          const { parsedEnv } = loadEnvConfig(
+          const { loadedEnvFiles } = loadEnvConfig(
             dir,
-            true,
+            process.env.NODE_ENV === 'development',
             Log,
             true,
             (envFilePath) => {
@@ -581,7 +635,14 @@ async function startWatcher(opts: SetupOpts) {
             // do not await, this is not essential for further process
             createEnvDefinitions({
               distDir,
-              env: { ...parsedEnv, ...nextConfig.env },
+              loadedEnvFiles: [
+                ...loadedEnvFiles,
+                {
+                  path: nextConfig.configFileName,
+                  env: nextConfig.env,
+                  contents: '',
+                },
+              ],
             })
           }
 
@@ -597,7 +658,7 @@ async function startWatcher(opts: SetupOpts) {
           try {
             tsconfigResult = await loadJsConfig(dir, nextConfig)
           } catch (_) {
-            /* do we want to log if there are syntax errors in tsconfig  while editing? */
+            /* do we want to log if there are syntax errors in tsconfig while editing? */
           }
         }
 
@@ -607,6 +668,10 @@ async function startWatcher(opts: SetupOpts) {
             opts.fsChecker.rewrites.beforeFiles.length > 0 ||
             opts.fsChecker.rewrites.fallback.length > 0
 
+          const rootPath =
+            opts.nextConfig.turbopack?.root ||
+            opts.nextConfig.outputFileTracingRoot ||
+            opts.dir
           await hotReloader.turbopackProject.update({
             defineEnv: createDefineEnv({
               isTurbopack: true,
@@ -619,7 +684,11 @@ async function startWatcher(opts: SetupOpts) {
               hasRewrites,
               // TODO: Implement
               middlewareMatchers: undefined,
+              projectPath: opts.dir,
+              rewrites: opts.fsChecker.rewrites,
             }),
+            rootPath,
+            projectPath: normalizePath(path.relative(rootPath, dir)),
           })
         }
 
@@ -691,9 +760,10 @@ async function startWatcher(opts: SetupOpts) {
                   hasRewrites,
                   isClient,
                   isEdgeServer,
-                  isNodeOrEdgeCompilation: isNodeServer || isEdgeServer,
                   isNodeServer,
                   middlewareMatchers: undefined,
+                  projectPath: opts.dir,
+                  rewrites: opts.fsChecker.rewrites,
                 })
 
                 Object.keys(plugin.definitions).forEach((key) => {
@@ -898,12 +968,120 @@ async function startWatcher(opts: SetupOpts) {
   const devMiddlewareManifestPath = `/_next/${CLIENT_STATIC_FILES_PATH}/development/${DEV_CLIENT_MIDDLEWARE_MANIFEST}`
   opts.fsChecker.devVirtualFsItems.add(devMiddlewareManifestPath)
 
+  const devTurbopackMiddlewareManifestPath = `/_next/${CLIENT_STATIC_FILES_PATH}/development/${TURBOPACK_CLIENT_MIDDLEWARE_MANIFEST}`
+  opts.fsChecker.devVirtualFsItems.add(devTurbopackMiddlewareManifestPath)
+
+  const mcpPath = `/_next/mcp`
+  opts.fsChecker.devVirtualFsItems.add(mcpPath)
+
+  let mcpSecret = process.env.NEXT_EXPERIMENTAL_MCP_SECRET
+    ? Buffer.from(process.env.NEXT_EXPERIMENTAL_MCP_SECRET)
+    : undefined
+
+  if (mcpSecret) {
+    try {
+      // eslint-disable-next-line import/no-extraneous-dependencies
+      require('@modelcontextprotocol/sdk/package.json')
+    } catch (error) {
+      Log.error(
+        'To use the MCP server, please install the `@modelcontextprotocol/sdk` package.'
+      )
+      mcpSecret = undefined
+    }
+  }
+  let createMcpServer: typeof import('./mcp').createMcpServer | undefined
+  let StreamableHTTPServerTransport:
+    | typeof import('./mcp').StreamableHTTPServerTransport
+    | undefined
+  if (mcpSecret) {
+    ;({ createMcpServer, StreamableHTTPServerTransport } =
+      require('./mcp') as typeof import('./mcp'))
+    Log.info(
+      `Experimental MCP server is available at: /_next/mcp?${mcpSecret.toString()}`
+    )
+  }
+
   async function requestHandler(req: IncomingMessage, res: ServerResponse) {
     const parsedUrl = url.parse(req.url || '/')
 
+    if (parsedUrl.pathname?.includes(mcpPath)) {
+      function sendMcpInternalError(message: string) {
+        res.statusCode = 500
+        res.setHeader('Content-Type', 'application/json; charset=utf-8')
+        res.end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            error: {
+              // "Internal error" see https://www.jsonrpc.org/specification
+              code: -32603,
+              message,
+            },
+            id: null,
+          })
+        )
+        return { finished: true }
+      }
+      if (!mcpSecret) {
+        Log.error('Next.js MCP server is not enabled')
+        Log.info(
+          'To enable it, set the NEXT_EXPERIMENTAL_MCP_SECRET environment variable to a secret value. This will make the MCP server available at /_next/mcp?{NEXT_EXPERIMENTAL_MCP_SECRET}'
+        )
+        return sendMcpInternalError(
+          'Missing NEXT_EXPERIMENTAL_MCP_SECRET environment variable'
+        )
+      }
+      if (!createMcpServer || !StreamableHTTPServerTransport) {
+        return sendMcpInternalError(
+          'Model Context Protocol (MCP) server is not available'
+        )
+      }
+      if (!parsedUrl.query) {
+        Log.error('No MCP secret provided in request query')
+        Log.info(
+          `Experimental MCP server is available at: /_next/mcp?${mcpSecret.toString()}`
+        )
+        return sendMcpInternalError('No MCP secret provided in request query')
+      }
+      let mcpSecretQuery = Buffer.from(parsedUrl.query)
+      if (
+        mcpSecretQuery.length !== mcpSecret.length ||
+        !timingSafeEqual(mcpSecretQuery, mcpSecret)
+      ) {
+        Log.error('Invalid MCP secret provided in request query')
+        Log.info(
+          `Experimental MCP server is available at: /_next/mcp?${mcpSecret.toString()}`
+        )
+        return sendMcpInternalError(
+          'Invalid MCP secret provided in request query'
+        )
+      }
+
+      const server = createMcpServer(hotReloader)
+      if (server) {
+        try {
+          const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: undefined,
+          })
+          res.on('close', () => {
+            transport.close()
+            server.close()
+          })
+          await server.connect(transport)
+          const parsedBody = await parseBody(req, 1024 * 1024 * 1024)
+          await transport.handleRequest(req, res, parsedBody)
+        } catch (error) {
+          Log.error('Error handling MCP request:', error)
+          if (!res.headersSent) {
+            return sendMcpInternalError('Internal server error')
+          }
+        }
+        return { finished: true }
+      }
+    }
+
     if (parsedUrl.pathname?.includes(clientPagesManifestPath)) {
       res.statusCode = 200
-      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.setHeader('Content-Type', JSON_CONTENT_TYPE_HEADER)
       res.end(
         JSON.stringify({
           pages: prevSortedRoutes.filter(
@@ -914,133 +1092,36 @@ async function startWatcher(opts: SetupOpts) {
       return { finished: true }
     }
 
-    if (parsedUrl.pathname?.includes(devMiddlewareManifestPath)) {
+    if (
+      parsedUrl.pathname?.includes(devMiddlewareManifestPath) ||
+      parsedUrl.pathname?.includes(devTurbopackMiddlewareManifestPath)
+    ) {
       res.statusCode = 200
-      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.setHeader('Content-Type', JSON_CONTENT_TYPE_HEADER)
       res.end(JSON.stringify(serverFields.middleware?.matchers || []))
       return { finished: true }
     }
     return { finished: false }
   }
 
-  async function logErrorWithOriginalStack(
+  function logErrorWithOriginalStack(
     err: unknown,
     type?: 'unhandledRejection' | 'uncaughtException' | 'warning' | 'app-dir'
   ) {
-    let usedOriginalStack = false
-
-    if (isError(err) && err.stack) {
-      try {
-        const frames = parseStack(err.stack!)
-        // Filter out internal edge related runtime stack
-        const frame = frames.find(
-          ({ file }) =>
-            !file?.startsWith('eval') &&
-            !file?.includes('web/adapter') &&
-            !file?.includes('web/globals') &&
-            !file?.includes('sandbox/context') &&
-            !file?.includes('<anonymous>')
-        )
-
-        let originalFrame, isEdgeCompiler
-        const frameFile = frame?.file
-        if (frame?.lineNumber && frameFile) {
-          if (hotReloader.turbopackProject) {
-            try {
-              originalFrame = await createOriginalTurboStackFrame(
-                hotReloader.turbopackProject,
-                {
-                  file: frameFile,
-                  methodName: frame.methodName,
-                  line: frame.lineNumber ?? 0,
-                  column: frame.column,
-                  isServer: true,
-                }
-              )
-            } catch {}
-          } else {
-            const moduleId = frameFile.replace(
-              /^(webpack-internal:\/\/\/|file:\/\/)/,
-              ''
-            )
-            const modulePath = frameFile.replace(
-              /^(webpack-internal:\/\/\/|file:\/\/)(\(.*\)\/)?/,
-              ''
-            )
-
-            const src = getErrorSource(err as Error)
-            isEdgeCompiler = src === COMPILER_NAMES.edgeServer
-            const compilation = (
-              isEdgeCompiler
-                ? hotReloader.edgeServerStats?.compilation
-                : hotReloader.serverStats?.compilation
-            )!
-
-            const source = await getSourceById(
-              !!frame.file?.startsWith(path.sep) ||
-                !!frame.file?.startsWith('file:'),
-              moduleId,
-              compilation
-            )
-
-            try {
-              originalFrame = await createOriginalStackFrame({
-                source,
-                frame,
-                moduleId,
-                modulePath,
-                rootDirectory: opts.dir,
-                errorMessage: err.message,
-                compilation: isEdgeCompiler
-                  ? hotReloader.edgeServerStats?.compilation
-                  : hotReloader.serverStats?.compilation,
-              })
-            } catch {}
-          }
-
-          if (
-            originalFrame?.originalCodeFrame &&
-            originalFrame.originalStackFrame
-          ) {
-            const { originalCodeFrame, originalStackFrame } = originalFrame
-            const { file, lineNumber, column, methodName } = originalStackFrame
-
-            Log[type === 'warning' ? 'warn' : 'error'](
-              `${file} (${lineNumber}:${column}) @ ${methodName}`
-            )
-
-            let errorToLog
-            if (isEdgeCompiler) {
-              errorToLog = err.message
-            } else if (isError(err) && hotReloader.turbopackProject) {
-              const stack = await traceTurbopackErrorStack(
-                hotReloader.turbopackProject,
-                err,
-                frames
-              )
-
-              const error: NextError = new Error(err.message)
-              error.stack = stack
-              error.digest = err.digest
-              errorToLog = error
-            } else {
-              errorToLog = err
-            }
-
-            logError(errorToLog, type)
-            console[type === 'warning' ? 'warn' : 'error'](originalCodeFrame)
-            usedOriginalStack = true
-          }
-        }
-      } catch (_) {
-        // failed to load original stack using source maps
-        // this un-actionable by users so we don't show the
-        // internal error and only show the provided stack
-      }
-    }
-
-    if (!usedOriginalStack) {
-      logError(err, type)
+    if (err instanceof ModuleBuildError) {
+      // Errors that may come from issues from the user's code
+      Log.error(err.message)
+    } else if (err instanceof TurbopackInternalError) {
+      // An internal Turbopack error that has been handled by next-swc, written
+      // to disk and a simplified message shown to user on the Rust side.
+    } else if (type === 'warning') {
+      Log.warn(err)
+    } else if (type === 'app-dir') {
+      Log.error(err)
+    } else if (type) {
+      Log.error(`${type}:`, err)
+    } else {
+      Log.error(err)
     }
   }
 
@@ -1062,33 +1143,15 @@ async function startWatcher(opts: SetupOpts) {
   }
 }
 
-function logError(
-  err: unknown,
-  type?: 'unhandledRejection' | 'uncaughtException' | 'warning' | 'app-dir'
-) {
-  if (err instanceof ModuleBuildError) {
-    // Errors that may come from issues from the user's code
-    Log.error(err.message)
-  } else if (err instanceof TurbopackInternalError) {
-    // An internal Turbopack error that has been handled by next-swc, written
-    // to disk and a simplified message shown to user on the Rust side.
-  } else if (type === 'warning') {
-    Log.warn(err)
-  } else if (type === 'app-dir') {
-    logAppDirError(err)
-  } else if (type) {
-    Log.error(`${type}:`, err)
-  } else {
-    Log.error(err)
-  }
-}
-
 export async function setupDevBundler(opts: SetupOpts) {
   const isSrcDir = path
     .relative(opts.dir, opts.pagesDir || opts.appDir || '')
     .startsWith('src')
 
-  const result = await startWatcher(opts)
+  const result = await startWatcher({
+    ...opts,
+    isSrcDir,
+  })
 
   opts.telemetry.record(
     eventCliSession(
@@ -1106,74 +1169,19 @@ export async function setupDevBundler(opts: SetupOpts) {
       }
     )
   )
+
+  // Track build features for dev server here:
+  opts.telemetry.record({
+    eventName: EVENT_BUILD_FEATURE_USAGE,
+    payload: {
+      featureName: 'turbopackPersistentCaching',
+      invocationCount: isPersistentCachingEnabled(opts.nextConfig) ? 1 : 0,
+    },
+  })
+
   return result
 }
 
 export type DevBundler = Awaited<ReturnType<typeof setupDevBundler>>
 
 // Returns a trace rewritten through Turbopack's sourcemaps
-async function traceTurbopackErrorStack(
-  project: Project,
-  error: Error,
-  frames: StackFrame[]
-): Promise<string> {
-  let originalFrames = await Promise.all(
-    frames.map(async (f) => {
-      try {
-        const traced = await batchedTraceSource(project, {
-          file: f.file!,
-          methodName: f.methodName,
-          line: f.lineNumber ?? 0,
-          column: f.column,
-          isServer: true,
-        })
-
-        return traced?.frame ?? f
-      } catch {
-        return f
-      }
-    })
-  )
-
-  return (
-    error.name +
-    ': ' +
-    error.message +
-    '\n' +
-    originalFrames
-      .map((f) => {
-        if (f == null) {
-          return null
-        }
-
-        let line = '    at'
-        if (f.methodName != null) {
-          line += ' ' + f.methodName
-        }
-
-        if (f.file != null) {
-          const file =
-            f.file.startsWith('/') ||
-            // Built-in "filenames" like `<anonymous>` shouldn't be made relative
-            f.file.startsWith('<') ||
-            f.file.startsWith('node:')
-              ? f.file
-              : `./${f.file}`
-
-          line += ` (${file}`
-          if (f.lineNumber != null) {
-            line += ':' + f.lineNumber
-
-            if (f.column != null) {
-              line += ':' + f.column
-            }
-          }
-          line += ')'
-        }
-
-        return line
-      })
-      .filter(Boolean)
-      .join('\n')
-  )
-}

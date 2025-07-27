@@ -31,12 +31,16 @@ use crate::next_config::NextConfig;
 pub async fn get_next_react_server_components_transform_rule(
     next_config: Vc<NextConfig>,
     is_react_server_layer: bool,
-    app_dir: Option<Vc<FileSystemPath>>,
+    app_dir: Option<FileSystemPath>,
 ) -> Result<ModuleRule> {
     let enable_mdx_rs = next_config.mdx_rs().await?.is_some();
+    let cache_components_enabled = *next_config.enable_cache_components().await?;
+    let use_cache_enabled = *next_config.enable_use_cache().await?;
     Ok(get_ecma_transform_rule(
         Box::new(NextJsReactServerComponents::new(
             is_react_server_layer,
+            cache_components_enabled,
+            use_cache_enabled,
             app_dir,
         )),
         enable_mdx_rs,
@@ -47,13 +51,22 @@ pub async fn get_next_react_server_components_transform_rule(
 #[derive(Debug)]
 struct NextJsReactServerComponents {
     is_react_server_layer: bool,
-    app_dir: Option<Vc<FileSystemPath>>,
+    cache_components_enabled: bool,
+    use_cache_enabled: bool,
+    app_dir: Option<FileSystemPath>,
 }
 
 impl NextJsReactServerComponents {
-    fn new(is_react_server_layer: bool, app_dir: Option<Vc<FileSystemPath>>) -> Self {
+    fn new(
+        is_react_server_layer: bool,
+        cache_components_enabled: bool,
+        use_cache_enabled: bool,
+        app_dir: Option<FileSystemPath>,
+    ) -> Self {
         Self {
             is_react_server_layer,
+            cache_components_enabled,
+            use_cache_enabled,
             app_dir,
         }
     }
@@ -73,11 +86,10 @@ impl CustomTransformer for NextJsReactServerComponents {
             file_name,
             Config::WithOptions(Options {
                 is_react_server_layer: self.is_react_server_layer,
+                cache_components_enabled: self.cache_components_enabled,
+                use_cache_enabled: self.use_cache_enabled,
             }),
-            match self.app_dir {
-                None => None,
-                Some(path) => Some(path.await?.path.clone().into()),
-            },
+            self.app_dir.as_ref().map(|path| path.path.clone().into()),
         );
 
         program.visit_with(&mut visitor);

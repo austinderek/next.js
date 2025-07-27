@@ -1,6 +1,7 @@
 use anyhow::Result;
-use indexmap::IndexMap;
-use turbo_tasks::{RcStr, Vc};
+use serde::{Deserialize, Serialize};
+use turbo_rcstr::RcStr;
+use turbo_tasks::{FxIndexMap, NonLocalValue, ResolvedVc, TaskInput, Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystemPath;
 
 use crate::environment::Environment;
@@ -11,7 +12,7 @@ macro_rules! definable_name_map_pattern_internal {
         [stringify!($name).into()]
     };
     ($name:ident typeof) => {
-        [stringify!($name).into(), $crate::compile_time_info::DefineableNameSegment::TypeOf]
+        [stringify!($name).into(), $crate::compile_time_info::DefinableNameSegment::TypeOf]
     };
     // Entry point for non-recursive calls
     ($name:ident . $($more:ident).+ typeof) => {
@@ -28,7 +29,7 @@ macro_rules! definable_name_map_pattern_internal {
         $crate::definable_name_map_pattern_internal!($($more).+, [$($array),+, stringify!($name).into()])
     };
     ($name:ident typeof, [$($array:expr),+]) => {
-        [$($array),+, stringify!($name).into(), $crate::compile_time_info::DefineableNameSegment::TypeOf]
+        [$($array),+, stringify!($name).into(), $crate::compile_time_info::DefinableNameSegment::TypeOf]
     };
     ($name:ident . $($more:ident).+ typeof, [$($array:expr),+]) => {
         $crate::definable_name_map_pattern_internal!($($more).+ typeof, [$($array),+, stringify!($name).into()])
@@ -80,7 +81,7 @@ macro_rules! definable_name_map_internal {
 macro_rules! compile_time_defines {
     ($($more:tt)+) => {
         {
-            let mut map = $crate::__private::IndexMap::new();
+            let mut map = $crate::__private::FxIndexMap::default();
             $crate::definable_name_map_internal!(map, $($more)+);
             $crate::compile_time_info::CompileTimeDefines(map)
         }
@@ -91,7 +92,7 @@ macro_rules! compile_time_defines {
 macro_rules! free_var_references {
     ($($more:tt)+) => {
         {
-            let mut map = $crate::__private::IndexMap::new();
+            let mut map = $crate::__private::FxIndexMap::default();
             $crate::definable_name_map_internal!(map, $($more)+);
             $crate::compile_time_info::FreeVarReferences(map)
         }
@@ -100,12 +101,13 @@ macro_rules! free_var_references {
 
 // TODO: replace with just a `serde_json::Value`
 // https://linear.app/vercel/issue/WEB-1641/compiletimedefinevalue-should-just-use-serde-jsonvalue
-#[turbo_tasks::value(serialization = "auto_for_input")]
-#[derive(Debug, Clone, Hash)]
+#[turbo_tasks::value]
+#[derive(Debug, Clone, Hash, TaskInput)]
 pub enum CompileTimeDefineValue {
     Bool(bool),
     String(RcStr),
     JSON(RcStr),
+    Undefined,
 }
 
 impl From<bool> for CompileTimeDefineValue {
@@ -138,38 +140,44 @@ impl From<serde_json::Value> for CompileTimeDefineValue {
     }
 }
 
-#[turbo_tasks::value(serialization = "auto_for_input")]
+#[turbo_tasks::value]
 #[derive(Debug, Clone, Hash)]
-pub enum DefineableNameSegment {
+pub enum DefinableNameSegment {
     Name(RcStr),
     TypeOf,
 }
 
-impl From<RcStr> for DefineableNameSegment {
+impl From<RcStr> for DefinableNameSegment {
     fn from(value: RcStr) -> Self {
-        DefineableNameSegment::Name(value)
+        DefinableNameSegment::Name(value)
     }
 }
 
-impl From<&str> for DefineableNameSegment {
+impl From<&str> for DefinableNameSegment {
     fn from(value: &str) -> Self {
-        DefineableNameSegment::Name(value.into())
+        DefinableNameSegment::Name(value.into())
     }
 }
 
-impl From<String> for DefineableNameSegment {
+impl From<String> for DefinableNameSegment {
     fn from(value: String) -> Self {
-        DefineableNameSegment::Name(value.into())
+        DefinableNameSegment::Name(value.into())
     }
 }
 
 #[turbo_tasks::value(transparent)]
 #[derive(Debug, Clone)]
-pub struct CompileTimeDefines(pub IndexMap<Vec<DefineableNameSegment>, CompileTimeDefineValue>);
+pub struct CompileTimeDefines(pub FxIndexMap<Vec<DefinableNameSegment>, CompileTimeDefineValue>);
+
+#[turbo_tasks::value(transparent)]
+#[derive(Debug, Clone)]
+pub struct CompileTimeDefinesIndividual(
+    pub FxIndexMap<Vec<DefinableNameSegment>, ResolvedVc<CompileTimeDefineValue>>,
+);
 
 impl IntoIterator for CompileTimeDefines {
-    type Item = (Vec<DefineableNameSegment>, CompileTimeDefineValue);
-    type IntoIter = indexmap::map::IntoIter<Vec<DefineableNameSegment>, CompileTimeDefineValue>;
+    type Item = (Vec<DefinableNameSegment>, CompileTimeDefineValue);
+    type IntoIter = indexmap::map::IntoIter<Vec<DefinableNameSegment>, CompileTimeDefineValue>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
@@ -180,8 +188,26 @@ impl IntoIterator for CompileTimeDefines {
 impl CompileTimeDefines {
     #[turbo_tasks::function]
     pub fn empty() -> Vc<Self> {
-        Vc::cell(IndexMap::new())
+        Vc::cell(FxIndexMap::default())
     }
+
+    #[turbo_tasks::function]
+    pub fn individual(&self) -> Vc<CompileTimeDefinesIndividual> {
+        Vc::cell(
+            self.0
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone().resolved_cell()))
+                .collect(),
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, NonLocalValue)]
+pub enum InputRelativeConstant {
+    // The project relative directory name of the source file
+    DirName,
+    // The project relative file name of the source file.
+    FileName,
 }
 
 #[turbo_tasks::value]
@@ -189,10 +215,13 @@ impl CompileTimeDefines {
 pub enum FreeVarReference {
     EcmaScriptModule {
         request: RcStr,
-        lookup_path: Option<Vc<FileSystemPath>>,
+        lookup_path: Option<FileSystemPath>,
         export: Option<RcStr>,
     },
+    Ident(RcStr),
+    Member(RcStr, RcStr),
     Value(CompileTimeDefineValue),
+    InputRelative(InputRelativeConstant),
     Error(RcStr),
 }
 
@@ -222,26 +251,54 @@ impl From<CompileTimeDefineValue> for FreeVarReference {
 
 #[turbo_tasks::value(transparent)]
 #[derive(Debug, Clone)]
-pub struct FreeVarReferences(pub IndexMap<Vec<DefineableNameSegment>, FreeVarReference>);
+pub struct FreeVarReferences(pub FxIndexMap<Vec<DefinableNameSegment>, FreeVarReference>);
+
+/// A map from the last element (the member prop) to a map of the rest of the name to the value.
+#[turbo_tasks::value(transparent)]
+#[derive(Debug, Clone)]
+pub struct FreeVarReferencesIndividual(
+    pub  FxIndexMap<
+        DefinableNameSegment,
+        FxIndexMap<Vec<DefinableNameSegment>, ResolvedVc<FreeVarReference>>,
+    >,
+);
 
 #[turbo_tasks::value_impl]
 impl FreeVarReferences {
     #[turbo_tasks::function]
     pub fn empty() -> Vc<Self> {
-        Vc::cell(IndexMap::new())
+        Vc::cell(FxIndexMap::default())
+    }
+
+    #[turbo_tasks::function]
+    pub fn individual(&self) -> Vc<FreeVarReferencesIndividual> {
+        let mut result: FxIndexMap<
+            DefinableNameSegment,
+            FxIndexMap<Vec<DefinableNameSegment>, ResolvedVc<FreeVarReference>>,
+        > = FxIndexMap::default();
+
+        for (key, value) in &self.0 {
+            let (last_key, key) = key.split_last().unwrap();
+            result
+                .entry(last_key.clone())
+                .or_default()
+                .insert(key.to_vec(), value.clone().resolved_cell());
+        }
+
+        Vc::cell(result)
     }
 }
 
 #[turbo_tasks::value(shared)]
 #[derive(Debug, Clone)]
 pub struct CompileTimeInfo {
-    pub environment: Vc<Environment>,
-    pub defines: Vc<CompileTimeDefines>,
-    pub free_var_references: Vc<FreeVarReferences>,
+    pub environment: ResolvedVc<Environment>,
+    pub defines: ResolvedVc<CompileTimeDefines>,
+    pub free_var_references: ResolvedVc<FreeVarReferences>,
 }
 
 impl CompileTimeInfo {
-    pub fn builder(environment: Vc<Environment>) -> CompileTimeInfoBuilder {
+    pub fn builder(environment: ResolvedVc<Environment>) -> CompileTimeInfoBuilder {
         CompileTimeInfoBuilder {
             environment,
             defines: None,
@@ -253,58 +310,65 @@ impl CompileTimeInfo {
 #[turbo_tasks::value_impl]
 impl CompileTimeInfo {
     #[turbo_tasks::function]
-    pub fn new(environment: Vc<Environment>) -> Vc<Self> {
-        CompileTimeInfo {
+    pub async fn new(environment: ResolvedVc<Environment>) -> Result<Vc<Self>> {
+        Ok(CompileTimeInfo {
             environment,
-            defines: CompileTimeDefines::empty(),
-            free_var_references: FreeVarReferences::empty(),
+            defines: CompileTimeDefines::empty().to_resolved().await?,
+            free_var_references: FreeVarReferences::empty().to_resolved().await?,
         }
-        .cell()
+        .cell())
     }
 
     #[turbo_tasks::function]
-    pub async fn environment(self: Vc<Self>) -> Result<Vc<Environment>> {
-        Ok(self.await?.environment)
+    pub fn environment(&self) -> Vc<Environment> {
+        *self.environment
     }
 }
 
 pub struct CompileTimeInfoBuilder {
-    environment: Vc<Environment>,
-    defines: Option<Vc<CompileTimeDefines>>,
-    free_var_references: Option<Vc<FreeVarReferences>>,
+    environment: ResolvedVc<Environment>,
+    defines: Option<ResolvedVc<CompileTimeDefines>>,
+    free_var_references: Option<ResolvedVc<FreeVarReferences>>,
 }
 
 impl CompileTimeInfoBuilder {
-    pub fn defines(mut self, defines: Vc<CompileTimeDefines>) -> Self {
+    pub fn defines(mut self, defines: ResolvedVc<CompileTimeDefines>) -> Self {
         self.defines = Some(defines);
         self
     }
 
-    pub fn free_var_references(mut self, free_var_references: Vc<FreeVarReferences>) -> Self {
+    pub fn free_var_references(
+        mut self,
+        free_var_references: ResolvedVc<FreeVarReferences>,
+    ) -> Self {
         self.free_var_references = Some(free_var_references);
         self
     }
 
-    pub fn build(self) -> CompileTimeInfo {
-        CompileTimeInfo {
+    pub async fn build(self) -> Result<CompileTimeInfo> {
+        Ok(CompileTimeInfo {
             environment: self.environment,
-            defines: self.defines.unwrap_or_else(CompileTimeDefines::empty),
-            free_var_references: self
-                .free_var_references
-                .unwrap_or_else(FreeVarReferences::empty),
-        }
+            defines: match self.defines {
+                Some(defines) => defines,
+                None => CompileTimeDefines::empty().to_resolved().await?,
+            },
+            free_var_references: match self.free_var_references {
+                Some(free_var_references) => free_var_references,
+                None => FreeVarReferences::empty().to_resolved().await?,
+            },
+        })
     }
 
-    pub fn cell(self) -> Vc<CompileTimeInfo> {
-        self.build().cell()
+    pub async fn cell(self) -> Result<Vc<CompileTimeInfo>> {
+        Ok(self.build().await?.cell())
     }
 }
 
 #[cfg(test)]
 mod test {
-    use indexmap::IndexMap;
+    use turbo_tasks::FxIndexMap;
 
-    use crate::compile_time_info::{DefineableNameSegment, FreeVarReference, FreeVarReferences};
+    use crate::compile_time_info::{DefinableNameSegment, FreeVarReference, FreeVarReferences};
 
     #[test]
     fn macro_parser() {
@@ -318,7 +382,7 @@ mod test {
                     export: Some("Buffer".into()),
                 },
             ),
-            FreeVarReferences(IndexMap::from_iter(vec![
+            FreeVarReferences(FxIndexMap::from_iter(vec![
                 (vec!["FOO".into()], FreeVarReference::Value("bar".into())),
                 (vec!["FOO".into()], FreeVarReference::Value(false.into())),
                 (
@@ -341,13 +405,13 @@ mod test {
                 typeof x.y = "b",
                 typeof x.y.z = "c"
             ),
-            FreeVarReferences(IndexMap::from_iter(vec![
+            FreeVarReferences(FxIndexMap::from_iter(vec![
                 (
-                    vec!["x".into(), DefineableNameSegment::TypeOf],
+                    vec!["x".into(), DefinableNameSegment::TypeOf],
                     FreeVarReference::Value("a".into())
                 ),
                 (
-                    vec!["x".into(), "y".into(), DefineableNameSegment::TypeOf],
+                    vec!["x".into(), "y".into(), DefinableNameSegment::TypeOf],
                     FreeVarReference::Value("b".into())
                 ),
                 (
@@ -355,7 +419,7 @@ mod test {
                         "x".into(),
                         "y".into(),
                         "z".into(),
-                        DefineableNameSegment::TypeOf
+                        DefinableNameSegment::TypeOf
                     ],
                     FreeVarReference::Value("c".into())
                 )

@@ -1,51 +1,53 @@
-use std::{
-    fmt,
-    hash::{BuildHasherDefault, Hash},
-};
+use std::{fmt, hash::Hash};
 
-use indexmap::IndexSet;
 use petgraph::{
+    Direction, Graph,
     algo::{condensation, has_path_connecting},
+    graph::NodeIndex,
     graphmap::GraphMap,
     prelude::DiGraphMap,
+    visit::EdgeRef,
 };
-use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
+use rustc_hash::{FxHashMap, FxHashSet};
 use swc_core::{
-    common::{comments::Comments, util::take::Take, Spanned, SyntaxContext, DUMMY_SP},
+    common::{BytePos, DUMMY_SP, Spanned, SyntaxContext, comments::Comments, util::take::Take},
     ecma::{
         ast::{
-            op, ClassDecl, Decl, DefaultDecl, EsReserved, ExportAll, ExportDecl,
-            ExportNamedSpecifier, ExportSpecifier, Expr, ExprStmt, FnDecl, Id, Ident, IdentName,
-            ImportDecl, ImportNamedSpecifier, ImportSpecifier, ImportStarAsSpecifier, KeyValueProp,
-            Lit, Module, ModuleDecl, ModuleExportName, ModuleItem, NamedExport, ObjectLit, Prop,
-            PropName, PropOrSpread, Stmt, VarDecl, VarDeclKind, VarDeclarator,
+            ClassDecl, Decl, DefaultDecl, EsReserved, ExportAll, ExportDecl, ExportNamedSpecifier,
+            ExportSpecifier, Expr, ExprStmt, FnDecl, Id, Ident, IdentName, ImportDecl,
+            ImportNamedSpecifier, ImportSpecifier, ImportStarAsSpecifier, KeyValueProp, Lit,
+            Module, ModuleDecl, ModuleExportName, ModuleItem, NamedExport, ObjectLit, Prop,
+            PropName, PropOrSpread, Stmt, Str, VarDecl, VarDeclKind, VarDeclarator, op,
         },
-        atoms::JsWord,
-        utils::{find_pat_ids, private_ident, quote_ident, ExprCtx, ExprExt},
+        atoms::Atom,
+        utils::{ExprCtx, ExprExt, find_pat_ids, quote_ident},
     },
 };
-use turbo_tasks::RcStr;
+use turbo_rcstr::RcStr;
+use turbo_tasks::FxIndexSet;
 
 use super::{
-    util::{
-        collect_top_level_decls, ids_captured_by, ids_used_by, ids_used_by_ignoring_nested, Vars,
-    },
     Key, TURBOPACK_PART_IMPORT_SOURCE,
+    util::{
+        Vars, collect_top_level_decls, ids_captured_by, ids_used_by, ids_used_by_ignoring_nested,
+    },
 };
-use crate::magic_identifier;
+use crate::{magic_identifier, tree_shake::optimizations::GraphOptimizer};
 
 /// The id of an item
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum ItemId {
-    Group(ItemIdGroupKind),
     Item { index: usize, kind: ItemIdItemKind },
+    Group(ItemIdGroupKind),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum ItemIdGroupKind {
+    /// Used only for testing
+    #[cfg(test)]
     ModuleEvaluation,
     /// `(local, export_name)``
-    Export(Id, JsWord),
+    Export(Id, Atom),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -54,39 +56,59 @@ pub(crate) enum ItemIdItemKind {
 
     ImportOfModule,
     /// Imports are split as multiple items.
+    ///
+    /// Note that this item is not actually present in the module, and rather a phantom node.
+    /// We only need this node to create an unique identifier for each binding in an import
+    /// declaration.
     ImportBinding(u32),
+    /// Reexport of a binding
+    ReexportBinding(u32),
     VarDeclarator(u32),
+}
+
+impl ItemId {
+    /// Returns true if this item is a phantom node.
+    ///
+    /// A phantom node is a node that is not actually present in the module, and rather a
+    /// placeholder to create an unique identifier.
+    pub fn is_phantom(&self) -> bool {
+        matches!(
+            self,
+            ItemId::Item {
+                kind: ItemIdItemKind::ImportBinding(..),
+                ..
+            }
+        )
+    }
 }
 
 impl fmt::Debug for ItemId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ItemId::Group(kind) => {
-                write!(f, "ItemId({:?})", kind)
+                write!(f, "ItemId({kind:?})")
             }
             ItemId::Item { index, kind } => {
-                write!(f, "ItemId({}, {:?})", index, kind)
+                write!(f, "ItemId({index}, {kind:?})")
             }
         }
     }
 }
-
-type FxBuildHasher = BuildHasherDefault<FxHasher>;
 
 /// Data about a module item
 pub(crate) struct ItemData {
     /// Is the module item hoisted?
     pub is_hoisted: bool,
 
-    /// TOOD(PACK-3166): We can use this field to optimize tree shaking
+    /// TODO(PACK-3166): We can use this field to optimize tree shaking
     #[allow(unused)]
     pub pure: bool,
 
     /// Variables declared or bound by this module item
-    pub var_decls: IndexSet<Id, FxBuildHasher>,
+    pub var_decls: FxIndexSet<Id>,
 
     /// Variables read by this module item during evaluation
-    pub read_vars: IndexSet<Id, FxBuildHasher>,
+    pub read_vars: FxIndexSet<Id>,
 
     /// Variables read by this module item eventually
     ///
@@ -97,20 +119,39 @@ pub(crate) struct ItemData {
     /// - Note: This doesn’t mean they are only read “after” initial evaluation. They might also be
     ///   read “during” initial evaluation on any module item with SIDE_EFFECTS. This kind of
     ///   interaction is handled by the module item with SIDE_EFFECTS.
-    pub eventual_read_vars: IndexSet<Id, FxBuildHasher>,
+    pub eventual_read_vars: FxIndexSet<Id>,
 
     /// Side effects that are triggered on local variables during evaluation
-    pub write_vars: IndexSet<Id, FxBuildHasher>,
+    pub write_vars: FxIndexSet<Id>,
 
     /// Side effects that are triggered on local variables eventually
-    pub eventual_write_vars: IndexSet<Id, FxBuildHasher>,
+    pub eventual_write_vars: FxIndexSet<Id>,
 
     /// Any other unknown side effects that are trigger during evaluation
     pub side_effects: bool,
 
     pub content: ModuleItem,
 
-    pub export: Option<JsWord>,
+    pub export: Option<Atom>,
+
+    /// This value denotes the module specifier of the [ImportDecl] that declares this
+    /// [ItemId].
+    ///
+    /// Used to optimize `ImportBinding`.
+    pub binding_source: Option<(Str, ImportSpecifier)>,
+
+    /// Explicit dependencies of this item.
+    ///
+    /// Used to depend from import binding to side-effect-import without additional analysis.
+    ///
+    /// - Note: ImportBinding should depend on actual import statements because those imports may
+    ///   have side effects.
+    ///
+    /// See https://github.com/vercel/next.js/pull/71234#issuecomment-2409810084 for the problematic
+    /// test case.
+    pub explicit_deps: Vec<ItemId>,
+
+    pub is_module_evaluation: bool,
 }
 
 impl fmt::Debug for ItemData {
@@ -125,6 +166,8 @@ impl fmt::Debug for ItemData {
             .field("eventual_write_vars", &self.eventual_write_vars)
             .field("side_effects", &self.side_effects)
             .field("export", &self.export)
+            .field("explicit_deps", &self.explicit_deps)
+            .field("is_module_evaluation", &self.is_module_evaluation)
             .finish()
     }
 }
@@ -142,6 +185,9 @@ impl Default for ItemData {
             content: ModuleItem::dummy(),
             pure: Default::default(),
             export: Default::default(),
+            binding_source: Default::default(),
+            explicit_deps: Default::default(),
+            is_module_evaluation: Default::default(),
         }
     }
 }
@@ -152,7 +198,7 @@ where
     T: Eq + Hash + Clone,
 {
     pub(super) idx_graph: DiGraphMap<u32, Dependency>,
-    pub(super) graph_ix: IndexSet<T, BuildHasherDefault<FxHasher>>,
+    pub(super) graph_ix: FxIndexSet<T>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -242,12 +288,12 @@ impl DepGraph {
     ///
     /// Note: ESM imports are immutable, but we do not handle it.
     pub(super) fn split_module(
-        &self,
+        &mut self,
         directives: &[ModuleItem],
         data: &FxHashMap<ItemId, ItemData>,
     ) -> SplitModuleResult {
         let groups = self.finalize(data);
-        let mut exports = FxHashMap::default();
+        let mut outputs = FxHashMap::default();
         let mut part_deps = FxHashMap::<_, Vec<PartId>>::default();
 
         let star_reexports: Vec<_> = data
@@ -266,11 +312,14 @@ impl DepGraph {
                 body: data.values().map(|v| v.content.clone()).collect(),
                 shebang: None,
             });
-            exports.insert(Key::ModuleEvaluation, 0);
+            outputs.insert(Key::ModuleEvaluation, 0);
         }
 
+        // See https://github.com/vercel/next.js/pull/71234#issuecomment-2409810084
+        // ImportBinding should depend on actual import statements because those imports may have
+        // side effects.
+        let mut importer = FxHashMap::default();
         let mut declarator = FxHashMap::default();
-        let mut exporter = FxHashMap::default();
 
         for (ix, group) in groups.graph_ix.iter().enumerate() {
             for id in group {
@@ -280,8 +329,14 @@ impl DepGraph {
                     declarator.entry(var.clone()).or_insert_with(|| ix as u32);
                 }
 
-                if let Some(export) = &item.export {
-                    exporter.insert(export.clone(), ix as u32);
+                if let ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
+                    specifiers,
+                    src,
+                    ..
+                })) = &item.content
+                    && specifiers.is_empty()
+                {
+                    importer.insert(src.value.clone(), ix as u32);
                 }
             }
         }
@@ -295,12 +350,15 @@ impl DepGraph {
                 .clone()
         };
 
+        let mut module_evaluation_ix = None;
+
         for (ix, group) in groups.graph_ix.iter().enumerate() {
             let mut chunk = Module {
                 span: DUMMY_SP,
                 body: directives.to_vec(),
                 shebang: None,
             };
+            let mut part_deps_done = FxHashSet::default();
 
             let mut required_vars = group
                 .iter()
@@ -313,30 +371,55 @@ impl DepGraph {
                         .chain(data.eventual_read_vars.iter())
                         .chain(data.eventual_write_vars.iter())
                 })
-                .collect::<IndexSet<_>>();
-
-            for item in group {
-                if let ItemId::Group(ItemIdGroupKind::Export(id, _)) = item {
-                    required_vars.insert(id);
-                }
-            }
+                .collect::<FxIndexSet<_>>();
 
             for id in group {
+                if id.is_phantom() {
+                    continue;
+                }
+
                 let data = data.get(id).unwrap();
 
                 for var in data.var_decls.iter() {
-                    required_vars.remove(var);
+                    required_vars.swap_remove(var);
+                }
+
+                // Depend on import statements from 'ImportBinding'
+                if let ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
+                    specifiers,
+                    src,
+                    ..
+                })) = &data.content
+                    && !specifiers.is_empty()
+                    && let Some(dep) = importer.get(&src.value)
+                    && *dep != ix as u32
+                    && part_deps_done.insert(*dep)
+                {
+                    part_deps
+                        .entry(ix as u32)
+                        .or_default()
+                        .push(PartId::Internal(*dep, true));
+
+                    chunk
+                        .body
+                        .push(ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
+                            span: DUMMY_SP,
+                            specifiers: vec![],
+                            src: Box::new(TURBOPACK_PART_IMPORT_SOURCE.into()),
+                            type_only: false,
+                            with: Some(Box::new(create_turbopack_part_id_assert(
+                                PartId::Internal(*dep, true),
+                            ))),
+                            phase: Default::default(),
+                        })));
                 }
             }
 
-            let mut use_export_instead_of_declarator = false;
-
-            for item in group {
-                match item {
+            for item_id in group {
+                match item_id {
                     ItemId::Group(ItemIdGroupKind::Export(..)) => {
-                        if let Some(export) = &data[item].export {
-                            use_export_instead_of_declarator = true;
-                            exports.insert(Key::Export(export.as_str().into()), ix as u32);
+                        if let Some(export) = &data[item_id].export {
+                            outputs.insert(Key::Export(export.as_str().into()), ix as u32);
 
                             let s = ExportSpecifier::Named(ExportNamedSpecifier {
                                 span: DUMMY_SP,
@@ -361,95 +444,61 @@ impl DepGraph {
                             ));
                         }
                     }
-                    ItemId::Group(ItemIdGroupKind::ModuleEvaluation) => {
-                        exports.insert(Key::ModuleEvaluation, ix as u32);
-                    }
 
-                    _ => {}
+                    _ => {
+                        if data[item_id].is_module_evaluation {
+                            debug_assert_eq!(module_evaluation_ix, None);
+                            module_evaluation_ix = Some(ix as u32);
+                            outputs.insert(Key::ModuleEvaluation, ix as u32);
+                        }
+                    }
                 }
             }
 
-            // Depend on direct dependencies so that they are executed before this module.
             for dep in groups
                 .idx_graph
-                .neighbors_directed(ix as u32, petgraph::Direction::Outgoing)
+                .neighbors_directed(ix as u32, Direction::Outgoing)
             {
-                chunk
-                    .body
-                    .push(ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
-                        span: DUMMY_SP,
-                        specifiers: vec![],
-                        src: Box::new(TURBOPACK_PART_IMPORT_SOURCE.into()),
-                        type_only: false,
-                        with: Some(Box::new(create_turbopack_part_id_assert(PartId::Internal(
-                            dep,
-                        )))),
-                        phase: Default::default(),
-                    })));
-            }
+                if dep == ix as u32 {
+                    continue;
+                }
 
-            // Workaround for implcit export issue of server actions.
-            //
-            // Inline server actions require the generated `$$ACTION_0` to be **exported**.
-            //
-            // But tree shaking works by removing unused code, and the **export** of $$ACTION_0 is
-            // cleary not used from the external module as it does not exist at all in the user
-            // code.
-            //
-            // So we need to add an import for $$ACTION_0 to the module, so that the export is
-            // preserved.
-            if use_export_instead_of_declarator {
-                for (other_ix, other_group) in groups.graph_ix.iter().enumerate() {
-                    if other_ix == ix {
+                let dep_item_ids = groups.graph_ix.get_index(dep as usize).unwrap();
+
+                for dep_item_id in dep_item_ids {
+                    let ItemId::Group(ItemIdGroupKind::Export(var, export)) = dep_item_id else {
+                        continue;
+                    };
+
+                    if !export.starts_with("$$RSC_SERVER_") {
                         continue;
                     }
 
-                    let deps = part_deps.entry(ix as u32).or_default();
+                    required_vars.swap_remove(var);
 
-                    for other_item in other_group {
-                        if let ItemId::Group(ItemIdGroupKind::Export(export, _)) = other_item {
-                            if !export.0.as_str().starts_with("$$ACTION_") {
-                                continue;
-                            }
+                    let dep_part_id = PartId::Export(export.as_str().into());
+                    let specifiers = vec![ImportSpecifier::Named(ImportNamedSpecifier {
+                        span: DUMMY_SP,
+                        local: var.clone().into(),
+                        imported: None,
+                        is_type_only: false,
+                    })];
 
-                            let Some(&declarator) = declarator.get(export) else {
-                                continue;
-                            };
+                    part_deps
+                        .entry(ix as u32)
+                        .or_default()
+                        .push(dep_part_id.clone());
 
-                            if declarator == ix as u32 {
-                                continue;
-                            }
-
-                            if !has_path_connecting(&groups.idx_graph, ix as u32, declarator, None)
-                            {
-                                continue;
-                            }
-
-                            let s = ImportSpecifier::Named(ImportNamedSpecifier {
-                                span: DUMMY_SP,
-                                local: export.clone().into(),
-                                imported: None,
-                                is_type_only: false,
-                            });
-
-                            required_vars.remove(export);
-
-                            deps.push(PartId::Export(export.0.as_str().into()));
-
-                            chunk.body.push(ModuleItem::ModuleDecl(ModuleDecl::Import(
-                                ImportDecl {
-                                    span: DUMMY_SP,
-                                    specifiers: vec![s],
-                                    src: Box::new(TURBOPACK_PART_IMPORT_SOURCE.into()),
-                                    type_only: false,
-                                    with: Some(Box::new(create_turbopack_part_id_assert(
-                                        PartId::Export(export.0.as_str().into()),
-                                    ))),
-                                    phase: Default::default(),
-                                },
-                            )));
-                        }
-                    }
+                    chunk
+                        .body
+                        .push(ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
+                            span: DUMMY_SP,
+                            specifiers,
+                            src: Box::new(TURBOPACK_PART_IMPORT_SOURCE.into()),
+                            type_only: false,
+                            with: Some(Box::new(create_turbopack_part_id_assert(dep_part_id))),
+                            phase: Default::default(),
+                        })));
                 }
             }
 
@@ -461,6 +510,64 @@ impl DepGraph {
 
                 if dep == ix as u32 {
                     continue;
+                }
+
+                part_deps_done.insert(dep);
+
+                let dep_item_ids = groups.graph_ix.get_index(dep as usize).unwrap();
+
+                // Optimization & workaround for `ImportBinding` fragments.
+                // Instead of importing the import binding fragment, we import the original module.
+                // In this way, we can preserve the import statement so that the other code analysis
+                // can work.
+                if dep_item_ids.len() == 1 {
+                    let dep_item_id = &dep_item_ids[0];
+                    let dep_item_data = data.get(dep_item_id).unwrap();
+
+                    if let Some((module_specifier, import_specifier)) =
+                        &dep_item_data.binding_source
+                    {
+                        // Preserve the order of the side effects by importing the
+                        // side-effect-import fragment first.
+
+                        if let Some(import_dep) = importer.get(&module_specifier.value)
+                            && *import_dep != ix as u32
+                        {
+                            part_deps
+                                .entry(ix as u32)
+                                .or_default()
+                                .push(PartId::Internal(*import_dep, true));
+
+                            chunk.body.push(ModuleItem::ModuleDecl(ModuleDecl::Import(
+                                ImportDecl {
+                                    span: DUMMY_SP,
+                                    specifiers: vec![],
+                                    src: Box::new(TURBOPACK_PART_IMPORT_SOURCE.into()),
+                                    type_only: false,
+                                    with: Some(Box::new(create_turbopack_part_id_assert(
+                                        PartId::Internal(*import_dep, true),
+                                    ))),
+                                    phase: Default::default(),
+                                },
+                            )));
+                        }
+
+                        let specifiers = vec![import_specifier.clone()];
+
+                        part_deps_done.insert(dep);
+
+                        chunk
+                            .body
+                            .push(ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
+                                span: DUMMY_SP,
+                                specifiers,
+                                src: Box::new(module_specifier.clone()),
+                                type_only: false,
+                                with: None,
+                                phase: Default::default(),
+                            })));
+                        continue;
+                    }
                 }
 
                 let specifiers = vec![ImportSpecifier::Named(ImportNamedSpecifier {
@@ -476,7 +583,7 @@ impl DepGraph {
                 part_deps
                     .entry(ix as u32)
                     .or_default()
-                    .push(PartId::Internal(dep));
+                    .push(PartId::Internal(dep, false));
 
                 chunk
                     .body
@@ -486,28 +593,83 @@ impl DepGraph {
                         src: Box::new(TURBOPACK_PART_IMPORT_SOURCE.into()),
                         type_only: false,
                         with: Some(Box::new(create_turbopack_part_id_assert(PartId::Internal(
-                            dep,
+                            dep, false,
+                        )))),
+                        phase: Default::default(),
+                    })));
+            }
+
+            // Depend on direct dependencies so that they are executed before this module.
+            for dep in groups
+                .idx_graph
+                .neighbors_directed(ix as u32, petgraph::Direction::Outgoing)
+            {
+                if dep == ix as u32 {
+                    continue;
+                }
+
+                if !part_deps_done.insert(dep) {
+                    continue;
+                }
+
+                part_deps
+                    .entry(ix as u32)
+                    .or_default()
+                    .push(PartId::Internal(dep, true));
+
+                chunk
+                    .body
+                    .push(ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
+                        span: DUMMY_SP,
+                        specifiers: vec![],
+                        src: Box::new(TURBOPACK_PART_IMPORT_SOURCE.into()),
+                        type_only: false,
+                        with: Some(Box::new(create_turbopack_part_id_assert(PartId::Internal(
+                            dep, true,
                         )))),
                         phase: Default::default(),
                     })));
             }
 
             for g in group {
+                if g.is_phantom() {
+                    continue;
+                }
+
                 // Skip directives, as we copy them to each modules.
                 if let ModuleItem::Stmt(Stmt::Expr(ExprStmt {
                     expr: box Expr::Lit(Lit::Str(s)),
                     ..
                 })) = &data[g].content
+                    && s.value.starts_with("use ")
                 {
-                    if s.value.starts_with("use ") {
-                        continue;
-                    }
+                    continue;
+                }
+
+                // Do not store export * in internal part fragments.
+                if let ModuleItem::ModuleDecl(ModuleDecl::ExportAll(export)) = &data[g].content {
+                    // Preserve side effects of import caused by export *
+                    chunk
+                        .body
+                        .push(ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
+                            span: export.span,
+                            specifiers: Default::default(),
+                            src: export.src.clone(),
+                            type_only: false,
+                            with: export.with.clone(),
+                            phase: Default::default(),
+                        })));
+                    continue;
                 }
 
                 chunk.body.push(data[g].content.clone());
             }
 
             for g in group {
+                if g.is_phantom() {
+                    continue;
+                }
+
                 let data = data.get(g).unwrap();
 
                 // Emit `export { foo }`
@@ -547,10 +709,14 @@ impl DepGraph {
                 }
             }
 
+            if chunk.body.is_empty() {
+                continue;
+            }
+
             modules.push(chunk);
         }
 
-        exports.insert(Key::Exports, modules.len() as u32);
+        outputs.insert(Key::Exports, modules.len() as u32);
 
         for star in &star_reexports {
             exports_module
@@ -560,8 +726,46 @@ impl DepGraph {
 
         modules.push(exports_module);
 
+        // Currently we need to have `Key::ModuleEvaluation` in the outputs
+        // even if it is empty.
+        if module_evaluation_ix.is_none() {
+            outputs.insert(Key::ModuleEvaluation, modules.len() as u32);
+            module_evaluation_ix = Some(modules.len() as u32);
+            modules.push(Module {
+                span: DUMMY_SP,
+                body: vec![],
+                shebang: None,
+            });
+        }
+
+        // Push `export {}` to the module evaluation to make it module.
+        modules[module_evaluation_ix.unwrap() as usize]
+            .body
+            .push(ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(
+                NamedExport {
+                    span: DUMMY_SP,
+                    specifiers: Default::default(),
+                    src: None,
+                    type_only: false,
+                    with: None,
+                },
+            )));
+
+        if !star_reexports.is_empty() {
+            let mut module = Module::dummy();
+            outputs.insert(Key::StarExports, modules.len() as u32);
+
+            for star in &star_reexports {
+                module
+                    .body
+                    .push(ModuleItem::ModuleDecl(ModuleDecl::ExportAll(star.clone())));
+            }
+
+            modules.push(module);
+        }
+
         SplitModuleResult {
-            entrypoints: exports,
+            entrypoints: outputs,
             part_deps,
             modules,
             star_reexports,
@@ -574,14 +778,43 @@ impl DepGraph {
     /// Note that [ModuleItem] and [Module] are represented as [ItemId] for
     /// performance.
     pub(super) fn finalize(
-        &self,
-        _data: &FxHashMap<ItemId, ItemData>,
+        &mut self,
+        data: &FxHashMap<ItemId, ItemData>,
     ) -> InternedGraph<Vec<ItemId>> {
-        let graph = self.g.idx_graph.clone().into_graph::<u32>();
+        let mut graph = self.g.idx_graph.clone().into_graph::<u32>();
 
-        let condensed = condensation(graph, false);
+        self.workaround_server_action(&mut graph, data);
+
+        let mut condensed = condensation(graph, true);
+
+        let optimizer = GraphOptimizer {
+            graph_ix: &self.g.graph_ix,
+        };
+
+        while optimizer.merge_single_incoming_nodes(&mut condensed)
+            || optimizer.merge_nodes_with_same_starting_point(&mut condensed)
+        {}
 
         let mut new_graph = InternedGraph::default();
+
+        // Sort the items to match the order of the original code.
+        for node in condensed.node_weights() {
+            let mut item_ids = node
+                .iter()
+                .map(|&ix| self.g.graph_ix[ix as usize].clone())
+                .collect::<Vec<_>>();
+            item_ids.sort();
+
+            debug_assert!(!item_ids.is_empty());
+
+            new_graph.node(&item_ids);
+        }
+
+        new_graph.graph_ix.sort_by(|a, b| a[0].cmp(&b[0]));
+
+        debug_assert_eq!(new_graph.idx_graph.node_count(), 0);
+        debug_assert_eq!(new_graph.idx_graph.edge_count(), 0);
+
         let mut done = FxHashSet::default();
 
         let mapped = condensed.map(
@@ -607,7 +840,12 @@ impl DepGraph {
 
         for node in self.g.graph_ix.iter() {
             let ix = self.g.get_node(node);
+
             if !done.contains(&ix) {
+                if data[node].pure {
+                    continue;
+                }
+
                 let item_ids = vec![node.clone()];
                 new_graph.node(&item_ids);
             }
@@ -651,15 +889,15 @@ impl DepGraph {
                         _ => {}
                     },
                     ModuleDecl::ExportNamed(item) => {
-                        if let Some(src) = &item.src {
+                        let import_id = if let Some(src) = &item.src {
                             // One item for the import for re-export
-                            let id = ItemId::Item {
+                            let import_id = ItemId::Item {
                                 index,
                                 kind: ItemIdItemKind::ImportOfModule,
                             };
-                            ids.push(id.clone());
+                            ids.push(import_id.clone());
                             items.insert(
-                                id,
+                                import_id.clone(),
                                 ItemData {
                                     is_hoisted: true,
                                     side_effects: true,
@@ -673,7 +911,11 @@ impl DepGraph {
                                     ..Default::default()
                                 },
                             );
-                        }
+
+                            Some(import_id)
+                        } else {
+                            None
+                        };
 
                         for (si, s) in item.specifiers.iter().enumerate() {
                             let (orig, mut local, exported) = match s {
@@ -716,7 +958,7 @@ impl DepGraph {
                             if let Some(src) = &item.src {
                                 let id = ItemId::Item {
                                     index,
-                                    kind: ItemIdItemKind::ImportBinding(si as _),
+                                    kind: ItemIdItemKind::ReexportBinding(si as _),
                                 };
                                 ids.push(id.clone());
 
@@ -750,6 +992,7 @@ impl DepGraph {
                                                 phase: Default::default(),
                                             },
                                         )),
+                                        explicit_deps: vec![import_id.clone().unwrap()],
                                         ..Default::default()
                                     },
                                 );
@@ -764,8 +1007,14 @@ impl DepGraph {
                             DefaultDecl::TsInterfaceDecl(_) => unreachable!(),
                         };
 
+                        // Mirror what `EsmModuleItem::code_generation` does, these are live
+                        // bindings if the class/function has an identifier.
                         let default_var = id.unwrap_or_else(|| {
-                            private_ident!(magic_identifier::mangle("default export"))
+                            Ident::new(
+                                magic_identifier::mangle("default export").into(),
+                                DUMMY_SP,
+                                Default::default(),
+                            )
                         });
 
                         {
@@ -784,7 +1033,7 @@ impl DepGraph {
                                     &top_level_vars,
                                 )
                             };
-                            used_ids.read.remove(&default_var.to_id());
+                            used_ids.read.swap_remove(&default_var.to_id());
                             used_ids.write.insert(default_var.to_id());
                             let mut captured_ids = if export.decl.is_fn_expr() {
                                 ids_captured_by(
@@ -796,7 +1045,7 @@ impl DepGraph {
                             } else {
                                 Vars::default()
                             };
-                            captured_ids.read.remove(&default_var.to_id());
+                            captured_ids.read.swap_remove(&default_var.to_id());
 
                             let data = ItemData {
                                 read_vars: used_ids.read,
@@ -830,8 +1079,13 @@ impl DepGraph {
                         exports.push((default_var.to_id(), "default".into()));
                     }
                     ModuleDecl::ExportDefaultExpr(export) => {
-                        let default_var =
-                            private_ident!(magic_identifier::mangle("default export"));
+                        // Mirror what `EsmModuleItem::code_generation` does, these are live
+                        // bindings if the class/function has an identifier.
+                        let default_var = Ident::new(
+                            magic_identifier::mangle("default export").into(),
+                            DUMMY_SP,
+                            Default::default(),
+                        );
 
                         {
                             // For
@@ -917,26 +1171,24 @@ impl DepGraph {
                 ModuleItem::ModuleDecl(ModuleDecl::Import(item)) => {
                     // We create multiple items for each import.
 
-                    {
-                        // One item for the import itself
-                        let id = ItemId::Item {
-                            index,
-                            kind: ItemIdItemKind::ImportOfModule,
-                        };
-                        ids.push(id.clone());
-                        items.insert(
-                            id,
-                            ItemData {
-                                is_hoisted: true,
-                                side_effects: true,
-                                content: ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
-                                    specifiers: Default::default(),
-                                    ..item.clone()
-                                })),
-                                ..Default::default()
-                            },
-                        );
-                    }
+                    // One item for the import itself
+                    let import_id = ItemId::Item {
+                        index,
+                        kind: ItemIdItemKind::ImportOfModule,
+                    };
+                    ids.push(import_id.clone());
+                    items.insert(
+                        import_id.clone(),
+                        ItemData {
+                            is_hoisted: true,
+                            side_effects: true,
+                            content: ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
+                                specifiers: Default::default(),
+                                ..item.clone()
+                            })),
+                            ..Default::default()
+                        },
+                    );
 
                     // One per binding
                     for (si, s) in item.specifiers.iter().enumerate() {
@@ -956,6 +1208,13 @@ impl DepGraph {
                                     specifiers: vec![s.clone()],
                                     ..item.clone()
                                 })),
+                                binding_source: if item.with.is_none() {
+                                    // Optimize by directly binding to the source
+                                    Some((*item.src.clone(), s.clone()))
+                                } else {
+                                    None
+                                },
+                                explicit_deps: vec![import_id.clone()],
                                 ..Default::default()
                             },
                         );
@@ -980,7 +1239,7 @@ impl DepGraph {
                         &top_level_vars,
                     );
                     let var_decls = {
-                        let mut v = IndexSet::with_capacity_and_hasher(1, Default::default());
+                        let mut v = FxIndexSet::with_capacity_and_hasher(1, Default::default());
                         v.insert(f.ident.to_id());
                         v
                     };
@@ -1011,7 +1270,7 @@ impl DepGraph {
                     let mut vars =
                         ids_used_by(&c.class, unresolved_ctxt, top_level_ctxt, &top_level_vars);
                     let var_decls = {
-                        let mut v = IndexSet::with_capacity_and_hasher(1, Default::default());
+                        let mut v = FxIndexSet::with_capacity_and_hasher(1, Default::default());
                         v.insert(c.ident.to_id());
                         v
                     };
@@ -1040,7 +1299,10 @@ impl DepGraph {
                         ids.push(id.clone());
 
                         let has_explicit_pure = match &decl.init {
-                            Some(e) => comments.has_flag(e.span().lo, "PURE"),
+                            Some(e) => {
+                                e.span().lo == BytePos::PURE
+                                    || comments.has_flag(e.span().lo, "PURE")
+                            }
                             _ => false,
                         };
 
@@ -1063,10 +1325,12 @@ impl DepGraph {
 
                         let side_effects = !has_explicit_pure
                             && (vars.found_unresolved
-                                || decl.init.as_deref().map_or(false, |e| {
-                                    e.may_have_side_effects(&ExprCtx {
+                                || decl.init.as_deref().is_some_and(|e| {
+                                    e.may_have_side_effects(ExprCtx {
                                         unresolved_ctxt,
                                         is_unresolved_ref_safe: false,
+                                        in_strict: false,
+                                        remaining_depth: 4,
                                     })
                                 }));
 
@@ -1076,6 +1340,7 @@ impl DepGraph {
                         });
                         vars.write.extend(decl_ids.iter().cloned());
                         let content = ModuleItem::Stmt(Stmt::Decl(Decl::Var(var_decl)));
+
                         items.insert(
                             id,
                             ItemData {
@@ -1182,22 +1447,6 @@ impl DepGraph {
             }
         }
 
-        {
-            // `module evaluation side effects` Node
-            let id = ItemId::Group(ItemIdGroupKind::ModuleEvaluation);
-            ids.push(id.clone());
-            items.insert(
-                id,
-                ItemData {
-                    content: ModuleItem::Stmt(Stmt::Expr(ExprStmt {
-                        span: DUMMY_SP,
-                        expr: "module evaluation".into(),
-                    })),
-                    ..Default::default()
-                },
-            );
-        }
-
         for (local, export_name) in exports {
             let id = ItemId::Group(ItemIdGroupKind::Export(local.clone(), export_name.clone()));
             ids.push(id.clone());
@@ -1276,6 +1525,122 @@ impl DepGraph {
 
         has_path_connecting(&self.g.idx_graph, from, to, None)
     }
+
+    /// Workaround for implicit export issue of server actions.
+    ///
+    /// Inline server actions require the generated `$$RSC_SERVER_0` to be **exported**.
+    ///
+    /// But tree shaking works by removing unused code, and the **export** of $$RSC_SERVER_0
+    /// is clearly not used from the external module as it does not exist at all
+    /// in the user code.
+    ///
+    /// So we need to add an import for $$RSC_SERVER_0 to the module, so that the export is
+    /// preserved.
+    fn workaround_server_action(
+        &mut self,
+        g: &mut Graph<u32, Dependency>,
+        data: &FxHashMap<ItemId, ItemData>,
+    ) {
+        fn collect_deps(
+            g: &Graph<u32, Dependency>,
+            done: &mut FxHashSet<NodeIndex>,
+            node: NodeIndex,
+        ) -> Vec<NodeIndex> {
+            let direct_deps = g
+                .edges_directed(node, Direction::Outgoing)
+                .map(|e| e.target())
+                .collect::<Vec<_>>();
+
+            if direct_deps.iter().all(|dep| done.contains(dep)) {
+                return direct_deps;
+            }
+
+            direct_deps
+                .into_iter()
+                .flat_map(|dep| {
+                    let mut v = if !done.insert(dep) {
+                        vec![]
+                    } else {
+                        collect_deps(g, done, dep)
+                    };
+
+                    v.push(dep);
+                    v
+                })
+                .collect()
+        }
+
+        let mut server_action_decls = FxHashMap::default();
+        let mut server_action_exports = FxHashMap::default();
+
+        for node in g.node_indices() {
+            let Some(ix) = g.node_weight(node) else {
+                continue;
+            };
+
+            let item_id = self.g.graph_ix.get_index(*ix as _).unwrap();
+
+            if let ItemId::Group(ItemIdGroupKind::Export(v, name)) = item_id
+                && name.starts_with("$$RSC_SERVER_")
+            {
+                server_action_exports.insert(v.0.clone(), node);
+            }
+
+            let item_data = &data[item_id];
+
+            for v in item_data.var_decls.iter() {
+                if v.0.starts_with("$$RSC_SERVER_") {
+                    server_action_decls.insert(node, v.0.clone());
+                }
+            }
+        }
+
+        if server_action_decls.is_empty() || server_action_exports.is_empty() {
+            return;
+        }
+
+        let mut queue = vec![];
+
+        for node in g.node_indices() {
+            let Some(ix) = g.node_weight(node) else {
+                continue;
+            };
+
+            let is_export_node = {
+                let item_id = self.g.graph_ix.get_index(*ix as _).unwrap();
+                matches!(item_id, ItemId::Group(ItemIdGroupKind::Export(..)))
+            };
+
+            if !is_export_node {
+                continue;
+            }
+
+            // If an export uses $$RSC_SERVER_0, depend on "export $$RSC_SERVER_0"
+
+            let mut done = FxHashSet::default();
+            let dependencies = collect_deps(g, &mut done, node);
+
+            for &dependency in dependencies.iter() {
+                if dependency == node {
+                    continue;
+                }
+
+                let Some(action_item_id) = server_action_decls.get(&dependency) else {
+                    continue;
+                };
+
+                let Some(action_export_node) = server_action_exports.get(action_item_id) else {
+                    continue;
+                };
+
+                queue.push((node, *action_export_node));
+            }
+        }
+
+        for (export_node, dep) in queue {
+            g.add_edge(export_node, dep, Dependency::Strong);
+        }
+    }
 }
 
 const ASSERT_CHUNK_KEY: &str = "__turbopack_part__";
@@ -1285,7 +1650,8 @@ pub(crate) enum PartId {
     ModuleEvaluation,
     Exports,
     Export(RcStr),
-    Internal(u32),
+    /// `(part_id, is_for_eval)`
+    Internal(u32, bool),
 }
 
 pub(crate) fn create_turbopack_part_id_assert(dep: PartId) -> ObjectLit {
@@ -1298,7 +1664,11 @@ pub(crate) fn create_turbopack_part_id_assert(dep: PartId) -> ObjectLit {
                 PartId::ModuleEvaluation => "module evaluation".into(),
                 PartId::Exports => "exports".into(),
                 PartId::Export(e) => format!("export {e}").into(),
-                PartId::Internal(dep) => (dep as f64).into(),
+                PartId::Internal(dep, is_for_eval) => {
+                    let v = dep as f64;
+                    if is_for_eval { v } else { -v }
+                }
+                .into(),
             },
         })))],
     }
@@ -1309,7 +1679,10 @@ pub(crate) fn find_turbopack_part_id_in_asserts(asserts: &ObjectLit) -> Option<P
         PropOrSpread::Prop(box Prop::KeyValue(KeyValueProp {
             key: PropName::Ident(key),
             value: box Expr::Lit(Lit::Num(chunk_id)),
-        })) if &*key.sym == ASSERT_CHUNK_KEY => Some(PartId::Internal(chunk_id.value as u32)),
+        })) if &*key.sym == ASSERT_CHUNK_KEY => Some(PartId::Internal(
+            chunk_id.value.abs() as u32,
+            chunk_id.value.is_sign_positive(),
+        )),
 
         PropOrSpread::Prop(box Prop::KeyValue(KeyValueProp {
             key: PropName::Ident(key),
@@ -1325,7 +1698,7 @@ pub(crate) fn find_turbopack_part_id_in_asserts(asserts: &ObjectLit) -> Option<P
 }
 /// givin a number, return a base54 encoded string
 /// `usize -> [a-zA-Z$_][a-zA-Z$_0-9]*`
-pub(crate) fn encode_base54(init: &mut usize, skip_reserved: bool) -> JsWord {
+pub(crate) fn encode_base54(init: &mut usize, skip_reserved: bool) -> Atom {
     static BASE54_CHARS: &[u8; 64] =
         b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$_";
 
@@ -1357,8 +1730,8 @@ pub(crate) fn encode_base54(init: &mut usize, skip_reserved: bool) -> JsWord {
 
     let s = unsafe {
         // Safety: We are only using ascii characters
-        // Safety: The stack memory for ret is alive while creating JsWord
-        JsWord::from(std::str::from_utf8_unchecked(&ret))
+        // Safety: The stack memory for ret is alive while creating Atom
+        Atom::from(std::str::from_utf8_unchecked(&ret))
     };
 
     if skip_reserved

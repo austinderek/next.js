@@ -51,17 +51,10 @@ describe('Custom Properties: Pass-Through IE11', () => {
           .replace(/\/\*.*?\*\//g, '')
           .trim()
 
-        if (process.env.TURBOPACK) {
-          expect(cssContent.replace(/\/\*.*?\*\//g, '').trim())
-            .toMatchInlineSnapshot(`
-            ":root {
-              --color: red;
-            }
-
-            h1 {
-              color: var(--color);
-            }"
-          `)
+        if (process.env.IS_TURBOPACK_TEST) {
+          expect(
+            cssContent.replace(/\/\*.*?\*\//g, '').trim()
+          ).toMatchInlineSnapshot(`":root{--color:red}h1{color:var(--color)}"`)
         } else {
           expect(
             cssContent.replace(/\/\*.*?\*\//g, '').trim()
@@ -108,17 +101,10 @@ describe('Custom Properties: Pass-Through Modern', () => {
           .replace(/\/\*.*?\*\//g, '')
           .trim()
 
-        if (process.env.TURBOPACK) {
-          expect(cssContent.replace(/\/\*.*?\*\//g, '').trim())
-            .toMatchInlineSnapshot(`
-            ":root {
-              --color: red;
-            }
-
-            h1 {
-              color: var(--color);
-            }"
-          `)
+        if (process.env.IS_TURBOPACK_TEST) {
+          expect(
+            cssContent.replace(/\/\*.*?\*\//g, '').trim()
+          ).toMatchInlineSnapshot(`":root{--color:red}h1{color:var(--color)}"`)
         } else {
           expect(
             cssContent.replace(/\/\*.*?\*\//g, '').trim()
@@ -130,7 +116,7 @@ describe('Custom Properties: Pass-Through Modern', () => {
 })
 
 // This is checking invalid CSS that Lightning CSS in Turbopack interprets differently. Since it's invalid syntax it's documented as unsupported.
-;(process.env.TURBOPACK ? describe.skip : describe)(
+;(process.env.IS_TURBOPACK_TEST ? describe.skip : describe)(
   'Inline Comments: Minify',
   () => {
     ;(process.env.TURBOPACK_DEV ? describe.skip : describe)(
@@ -168,7 +154,7 @@ describe('Custom Properties: Pass-Through Modern', () => {
             .replace(/\/\*.*?\*\//g, '')
             .trim()
 
-          if (process.env.TURBOPACK) {
+          if (process.env.IS_TURBOPACK_TEST) {
             expect(
               cssContent.replace(/\/\*.*?\*\//g, '').trim()
             ).toMatchInlineSnapshot(`""`)

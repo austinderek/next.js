@@ -16,6 +16,7 @@ import { createEmptyCacheNode } from '../../app-router'
 import { handleSegmentMismatch } from '../handle-segment-mismatch'
 import { hasInterceptionRouteInCurrentTree } from './has-interception-route-in-current-tree'
 import { refreshInactiveParallelSegments } from '../refetch-inactive-parallel-segments'
+import { revalidateEntireCache } from '../../segment-cache'
 
 export function refreshReducer(
   state: ReadonlyReducerState,
@@ -45,9 +46,9 @@ export function refreshReducer(
       'refetch',
     ],
     nextUrl: includeNextUrl ? state.nextUrl : null,
-    buildId: state.buildId,
   })
 
+  const navigatedAt = Date.now()
   return cache.lazyData.then(
     async ({ flightData, canonicalUrl: canonicalUrlOverride }) => {
       // Handle case when navigating to page in `pages` from `app`
@@ -114,17 +115,24 @@ export function refreshReducer(
           cache.prefetchRsc = null
           cache.loading = loading
           fillLazyItemsTillLeafWithHead(
+            navigatedAt,
             cache,
             // Existing cache is not passed in as `router.refresh()` has to invalidate the entire cache.
             undefined,
             treePatch,
             cacheNodeSeedData,
-            head
+            head,
+            undefined
           )
-          mutable.prefetchCache = new Map()
+          if (process.env.__NEXT_CLIENT_SEGMENT_CACHE) {
+            revalidateEntireCache(state.nextUrl, newTree)
+          } else {
+            mutable.prefetchCache = new Map()
+          }
         }
 
         await refreshInactiveParallelSegments({
+          navigatedAt,
           state,
           updatedTree: newTree,
           updatedCache: cache,

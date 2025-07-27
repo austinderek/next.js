@@ -4,14 +4,16 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    Vc, VcValueTrait,
     registry::get_value_type,
     task::shared_reference::TypedSharedReference,
-    vc::{cast::VcCast, ReadVcFuture, VcValueTraitCast},
-    Vc, VcValueTrait,
+    vc::{ReadVcFuture, VcValueTraitCast, cast::VcCast},
 };
 
 /// Similar to a [`ReadRef<T>`][crate::ReadRef], but contains a value trait
-/// object instead. The only way to interact with a `TraitRef<T>` is by passing
+/// object instead.
+///
+/// The only way to interact with a `TraitRef<T>` is by passing
 /// it around or turning it back into a value trait vc by calling
 /// [`ReadRef::cell`][crate::ReadRef::cell].
 ///
@@ -70,6 +72,43 @@ impl<'de, T> Deserialize<'de> for TraitRef<T> {
     }
 }
 
+// This is a workaround for https://github.com/rust-lang/rust-analyzer/issues/19971
+// that ensures type inference keeps working with ptr_metadata.
+
+#[cfg(rust_analyzer)]
+impl<U> std::ops::Deref for TraitRef<Box<U>>
+where
+    U: ?Sized,
+    Box<U>: VcValueTrait,
+{
+    type Target = U;
+
+    fn deref(&self) -> &Self::Target {
+        unimplemented!("only exists for rust-analyzer type inference")
+    }
+}
+
+#[cfg(not(rust_analyzer))]
+impl<U> std::ops::Deref for TraitRef<Box<U>>
+where
+    Box<U>: VcValueTrait<ValueTrait = U>,
+    U: std::ptr::Pointee<Metadata = std::ptr::DynMetadata<U>> + ?Sized,
+{
+    type Target = U;
+
+    fn deref(&self) -> &Self::Target {
+        // This lookup will fail if the value type stored does not actually implement the trait,
+        // which implies a bug in either the registry code or the macro code.
+        let metadata =
+            <Box<U> as VcValueTrait>::get_impl_vtables().get(self.shared_reference.type_id);
+        let downcast_ptr = std::ptr::from_raw_parts(
+            self.shared_reference.reference.0.as_ptr() as *const (),
+            metadata,
+        );
+        unsafe { &*downcast_ptr }
+    }
+}
+
 // Otherwise, TraitRef<Box<dyn Trait>> would not be Sync.
 // SAFETY: TraitRef doesn't actually contain a T.
 unsafe impl<T> Sync for TraitRef<T> where T: ?Sized {}
@@ -92,13 +131,16 @@ where
     }
 
     pub fn ptr_eq(this: &Self, other: &Self) -> bool {
-        triomphe::Arc::ptr_eq(&this.shared_reference.1 .0, &other.shared_reference.1 .0)
+        triomphe::Arc::ptr_eq(
+            &this.shared_reference.reference.0,
+            &other.shared_reference.reference.0,
+        )
     }
 }
 
 impl<T> TraitRef<T>
 where
-    T: VcValueTrait + ?Sized + Send,
+    T: VcValueTrait + ?Sized,
 {
     /// Returns a new cell that points to a value that implements the value
     /// trait `T`.
@@ -106,7 +148,7 @@ where
         let TraitRef {
             shared_reference, ..
         } = trait_ref;
-        let value_type = get_value_type(shared_reference.0);
+        let value_type = get_value_type(shared_reference.type_id);
         (value_type.raw_cell)(shared_reference).into()
     }
 }
@@ -122,13 +164,11 @@ pub trait IntoTraitRef {
     type Future: Future<Output = Result<<VcValueTraitCast<Self::ValueTrait> as VcCast>::Output>>;
 
     fn into_trait_ref(self) -> Self::Future;
-    fn into_trait_ref_untracked(self) -> Self::Future;
-    fn into_trait_ref_strongly_consistent_untracked(self) -> Self::Future;
 }
 
 impl<T> IntoTraitRef for Vc<T>
 where
-    T: VcValueTrait + ?Sized + Send,
+    T: VcValueTrait + ?Sized,
 {
     type ValueTrait = T;
 
@@ -136,13 +176,5 @@ where
 
     fn into_trait_ref(self) -> Self::Future {
         self.node.into_read().into()
-    }
-
-    fn into_trait_ref_untracked(self) -> Self::Future {
-        self.node.into_read_untracked().into()
-    }
-
-    fn into_trait_ref_strongly_consistent_untracked(self) -> Self::Future {
-        self.node.into_strongly_consistent_read_untracked().into()
     }
 }

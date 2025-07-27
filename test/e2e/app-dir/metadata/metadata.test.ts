@@ -7,6 +7,7 @@ import {
   createMultiDomMatcher,
   checkMetaNameContentPair,
   checkLink,
+  retry,
 } from 'next-test-utils'
 import fs from 'fs/promises'
 import path from 'path'
@@ -82,6 +83,8 @@ describe('app dir - metadata', () => {
         preconnect: '/preconnect-url',
         preload: '/api/preload',
         'dns-prefetch': '/dns-prefetch-url',
+        prev: '/basic?page=1',
+        next: '/basic?page=3',
       })
 
       // Manifest link should have crossOrigin attribute
@@ -117,6 +120,8 @@ describe('app dir - metadata', () => {
         preconnect: '/preconnect-url',
         preload: '/api/preload',
         'dns-prefetch': '/dns-prefetch-url',
+        prev: '/basic?page=1',
+        next: '/basic?page=3',
       })
 
       // Manifest link should have crossOrigin attribute
@@ -132,7 +137,7 @@ describe('app dir - metadata', () => {
 
       await matchMultiDom('meta', 'name', 'content', {
         'apple-itunes-app': 'app-id=myAppStoreID, app-argument=myAppArgument',
-        'apple-mobile-web-app-capable': 'yes',
+        'mobile-web-app-capable': 'yes',
         'apple-mobile-web-app-title': 'Apple Web App',
         'apple-mobile-web-app-status-bar-style': 'black-translucent',
       })
@@ -158,13 +163,14 @@ describe('app dir - metadata', () => {
       )
     })
 
-    it('should support facebook related tags', async () => {
-      const browser = await next.browser('/facebook')
+    it('should support socials related tags like facebook and pinterest', async () => {
+      const browser = await next.browser('/socials')
       const matchMultiDom = createMultiDomMatcher(browser)
 
       await matchMultiDom('meta', 'property', 'content', {
         'fb:app_id': '12345678',
         'fb:admins': ['120', '122', '124'],
+        'pinterest-rich-pin': 'true',
       })
     })
 
@@ -222,16 +228,17 @@ describe('app dir - metadata', () => {
       const browser = await next.browser('/')
       await browser.waitForElementByCss('p#index')
       await browser.eval(`next.router.push('/alternates')`)
-      // wait for /alternates page is loaded
-      await browser.waitForElementByCss('p#alternates')
 
       const matchDom = createDomMatcher(browser)
-      await matchDom('link', 'rel="canonical"', {
-        href: 'https://example.com/alternates',
-      })
-      await matchDom('link', 'title="js title"', {
-        type: 'application/rss+xml',
-        href: 'https://example.com/blog/js.rss',
+      // Dynamic metadata streams in async
+      await retry(async () => {
+        await matchDom('link', 'rel="canonical"', {
+          href: 'https://example.com/alternates',
+        })
+        await matchDom('link', 'title="js title"', {
+          type: 'application/rss+xml',
+          href: 'https://example.com/blog/js.rss',
+        })
       })
     })
 
@@ -278,18 +285,24 @@ describe('app dir - metadata', () => {
         .click()
         .waitForElementByCss('#basic')
 
-      await checkMetaNameContentPair(
-        browser,
-        'referrer',
-        'origin-when-cross-origin'
-      )
+      await retry(async () => {
+        await checkMetaNameContentPair(
+          browser,
+          'referrer',
+          'origin-when-cross-origin'
+        )
+      })
+
       await browser.back().waitForElementByCss('#index')
       expect(await getTitle(browser)).toBe('index page')
       await browser
         .elementByCss('#to-title')
         .click()
         .waitForElementByCss('#title')
-      expect(await getTitle(browser)).toBe('this is the page title')
+
+      await retry(async () => {
+        expect(await getTitle(browser)).toBe('this is the page title')
+      })
     })
 
     it('should support generateMetadata dynamic props', async () => {
@@ -440,6 +453,15 @@ describe('app dir - metadata', () => {
       expect(favicon).toMatch('/favicon.ico')
       expect(icons).toEqual(['https://custom-icon-1.png'])
     })
+
+    it('metadataBase should override fallback base for resolving OG images', async () => {
+      const browser = await next.browser('/metadata-base/opengraph')
+      const matchMultiDom = createMultiDomMatcher(browser)
+
+      await matchMultiDom('meta', 'property', 'content', {
+        'og:image': 'https://acme.com/og-image.png',
+      })
+    })
   })
 
   describe('icons', () => {
@@ -535,8 +557,8 @@ describe('app dir - metadata', () => {
     it('should render icon and apple touch icon meta if their images are specified', async () => {
       const $ = await next.render$('/icons/static/nested')
 
-      const $icon = $('head > link[rel="icon"][type!="image/x-icon"]')
-      const $appleIcon = $('head > link[rel="apple-touch-icon"]')
+      const $icon = $('link[rel="icon"][type!="image/x-icon"]')
+      const $appleIcon = $('link[rel="apple-touch-icon"]')
 
       expect($icon.attr('href')).toMatch(/\/icons\/static\/nested\/icon1/)
       expect($icon.attr('sizes')).toBe('32x32')
@@ -551,19 +573,17 @@ describe('app dir - metadata', () => {
     it('should not render if image file is not specified', async () => {
       const $ = await next.render$('/icons/static')
 
-      const $icon = $('head > link[rel="icon"][type!="image/x-icon"]')
+      const $icon = $('link[rel="icon"][type!="image/x-icon"]')
 
       expect($icon.attr('href')).toMatch(/\/icons\/static\/icon/)
       expect($icon.attr('sizes')).toBe('114x114')
 
       // No apple icon if it's not provided
-      const $appleIcon = $('head > link[rel="apple-touch-icon"]')
+      const $appleIcon = $('link[rel="apple-touch-icon"]')
       expect($appleIcon.length).toBe(0)
 
       const $dynamic = await next.render$('/icons/static/dynamic-routes/123')
-      const $dynamicIcon = $dynamic(
-        'head > link[rel="icon"][type!="image/x-icon"]'
-      )
+      const $dynamicIcon = $dynamic('link[rel="icon"][type!="image/x-icon"]')
       const dynamicIconHref = $dynamicIcon.attr('href')
       expect(dynamicIconHref).toMatch(
         /\/icons\/static\/dynamic-routes\/123\/icon/
@@ -762,6 +782,14 @@ describe('app dir - metadata', () => {
         'theme-color': '#000',
       })
     })
+
+    it('should skip initial-scale from viewport if it is set to undefined', async () => {
+      const browser = await next.browser('/viewport/skip-initial-scale')
+      const matchMultiDom = createMultiDomMatcher(browser)
+      await matchMultiDom('meta', 'name', 'content', {
+        viewport: 'width=device-width',
+      })
+    })
   })
 
   describe('react cache', () => {
@@ -789,6 +817,12 @@ describe('app dir - metadata', () => {
         .waitForElementByCss('#value')
       const value = await browser.elementByCss('#value').text()
       const value2 = await browser.elementByCss('#value2').text()
+      // Dynamic metadata streams in async
+      await retry(async () => {
+        expect(await browser.eval(`document.title`)).toContain(
+          '"page":"cache-deduping"'
+        )
+      })
       // Value in the title should match what's shown on the page component
       const title = await browser.eval(`document.title`)
       const obj = JSON.parse(title)
@@ -813,7 +847,7 @@ describe('app dir - metadata', () => {
     if (isNextDev) {
       // This test frequently causes a compilation error when run in Turbopack
       // which also causes all subsequent tests to fail. Disabled while we investigate to reduce flakes.
-      ;(process.env.TURBOPACK ? it.skip : it)(
+      ;(process.env.IS_TURBOPACK_TEST ? it.skip : it)(
         'should handle updates to the file icon name and order',
         async () => {
           await next.renameFile(
@@ -823,7 +857,7 @@ describe('app dir - metadata', () => {
 
           await check(async () => {
             const $ = await next.render$('/icons/static')
-            const $icon = $('head > link[rel="icon"][type!="image/x-icon"]')
+            const $icon = $('link[rel="icon"][type!="image/x-icon"]')
             return $icon.attr('href')
           }, /\/icons\/static\/icon2/)
 
@@ -834,5 +868,22 @@ describe('app dir - metadata', () => {
         }
       )
     }
+  })
+
+  it('regression: renders a large shell', async () => {
+    const pageErrors: unknown[] = []
+    await next.browser('/large-shell/foo', {
+      beforePageLoad(page) {
+        page.on('pageerror', (error) => {
+          pageErrors.push(error)
+        })
+      },
+    })
+
+    // TODO: Assert on errorless pages by default.
+    // This isn't 100% accurate.
+    // We sometimes receive the pageerror after the hydration complete event
+    // since that event is just for shell hydration not everything being hydrated.
+    expect(pageErrors).toEqual([])
   })
 })

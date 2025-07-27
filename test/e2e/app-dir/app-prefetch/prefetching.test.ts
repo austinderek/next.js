@@ -1,7 +1,7 @@
 import { nextTestSetup } from 'e2e-utils'
 import { check, waitFor, retry } from 'next-test-utils'
-import type { Page, Request, Route } from 'playwright'
 import { NEXT_RSC_UNION_QUERY } from 'next/dist/client/components/app-router-headers'
+import { computeCacheBustingSearchParam } from 'next/dist/shared/lib/router/utils/cache-busting-search-param'
 
 const browserConfigWithFixedTime = {
   beforePageLoad: (page) => {
@@ -26,6 +26,8 @@ const browserConfigWithFixedTime = {
     })
   },
 }
+
+const itHeaded = process.env.HEADLESS ? it.skip : it
 
 describe('app dir - prefetching', () => {
   const { next, isNextDev, isNextDeploy } = nextTestSetup({
@@ -75,6 +77,42 @@ describe('app dir - prefetching', () => {
     await browser.eval('window.nd.router.push("/dashboard/123")')
     expect(next.cliOutput).not.toContain('ReferenceError')
     expect(next.cliOutput).not.toContain('is not defined')
+  })
+
+  it('should not have prefetch error when reloading before prefetch request is finished', async () => {
+    const browser = await next.browser('/')
+    await browser.eval('window.next.router.prefetch("/dashboard/123")')
+    await browser.refresh()
+    const logs = await browser.log()
+
+    expect(logs).not.toMatchObject(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringContaining('Failed to fetch RSC payload'),
+        }),
+      ])
+    )
+  })
+
+  itHeaded('should not suppress prefetches after navigating back', async () => {
+    // Force headed mode, as bfcache is not available in headless mode.
+    const browser = await next.browser('/', { headless: false })
+
+    // Trigger a hard navigation.
+    await browser.elementById('to-static-page-hard').click()
+
+    // Go back, utilizing the bfcache.
+    await browser.elementById('go-back').click()
+
+    let requests: string[] = []
+    browser.on('request', (req) => {
+      requests.push(new URL(req.url()).pathname)
+    })
+
+    await browser.eval('window.next.router.prefetch("/dashboard/123")')
+    await browser.waitForIdleNetwork()
+
+    expect(requests).toInclude('/dashboard/123')
   })
 
   it('should not fetch again when a static page was prefetched', async () => {
@@ -232,7 +270,7 @@ describe('app dir - prefetching', () => {
     })
 
     const prefetchResponse = await response.text()
-    expect(prefetchResponse).toContain('Page Data!')
+    expect(prefetchResponse).not.toContain('Page Data!')
     expect(prefetchResponse).not.toContain('Layout Data!')
     expect(prefetchResponse).not.toContain('Loading Prefetch Auto')
   })
@@ -257,14 +295,26 @@ describe('app dir - prefetching', () => {
         true,
       ])
     )
-    const response = await next.fetch(`/prefetch-auto/justputit?_rsc=dcqtr`, {
-      headers: {
-        RSC: '1',
-        'Next-Router-Prefetch': '1',
-        'Next-Router-State-Tree': stateTree,
-        'Next-Url': '/prefetch-auto/vercel',
-      },
-    })
+
+    const headers = {
+      RSC: '1',
+      'Next-Router-Prefetch': '1',
+      'Next-Router-State-Tree': stateTree,
+      'Next-Url': '/prefetch-auto/vercel',
+    }
+
+    const url = new URL('/prefetch-auto/justputit', 'http://localhost')
+    const cacheBustingParam = computeCacheBustingSearchParam(
+      headers['Next-Router-Prefetch'],
+      undefined,
+      headers['Next-Router-State-Tree'],
+      headers['Next-Url']
+    )
+    if (cacheBustingParam) {
+      url.searchParams.set('_rsc', cacheBustingParam)
+    }
+
+    const response = await next.fetch(url.toString(), { headers })
 
     const prefetchResponse = await response.text()
     expect(prefetchResponse).not.toContain('Page Data!')
@@ -299,6 +349,157 @@ describe('app dir - prefetching', () => {
     expect(loadingText).toBe('Loading Prefetch Auto')
 
     await browser.waitForElementByCss('#prefetch-auto-page-data')
+  })
+
+  it('should not unintentionally modify the requested prefetch by escaping the uri encoded query params', async () => {
+    const rscRequests = []
+    const browser = await next.browser('/uri-encoded-prefetch', {
+      beforePageLoad(page) {
+        page.on('request', async (req) => {
+          const url = new URL(req.url())
+          if (url.searchParams.has('_rsc')) {
+            rscRequests.push(url.pathname + url.search)
+          }
+        })
+      },
+    })
+
+    // sanity check: the link should be present
+    expect(await browser.elementById('prefetch-via-link')).toBeDefined()
+
+    await browser.waitForIdleNetwork()
+
+    // The space encoding of the prefetch request should be the same as the href, and should not be replaced with a +
+    await retry(async () => {
+      expect(
+        rscRequests.filter((req) => req.includes('/?param=with%20space'))
+      ).toHaveLength(1)
+    })
+
+    // Click the link
+    await browser.elementById('prefetch-via-link').click()
+
+    // Assert that we're on the homepage
+    expect(await browser.hasElementByCssSelector('#to-dashboard')).toBe(true)
+
+    await browser.waitForIdleNetwork()
+
+    // No new requests should be made since it is correctly prefetched
+    await retry(async () => {
+      expect(
+        rscRequests.filter((req) => req.includes('/?param=with%20space'))
+      ).toHaveLength(1)
+    })
+  })
+
+  describe('prefetch cache seeding', () => {
+    it('should not re-fetch the initial static page if the same page is prefetched with prefetch={true}', async () => {
+      const rscRequests = []
+      const browser = await next.browser('/static-page', {
+        beforePageLoad(page) {
+          page.on('request', async (req) => {
+            const url = new URL(req.url())
+            if (url.pathname === '/static-page' || url.pathname === '/') {
+              const headers = await req.allHeaders()
+              if (headers['rsc']) {
+                rscRequests.push(url.pathname)
+              }
+            }
+          })
+        },
+      })
+
+      expect(
+        await browser.hasElementByCssSelector('[href="/static-page"]')
+      ).toBe(true)
+
+      // sanity check: we should see a prefetch request to the root page
+      await retry(async () => {
+        expect(rscRequests.filter((req) => req === '/').length).toBe(1)
+      })
+
+      // We shouldn't see any requests to the static page since the prefetch cache was seeded as part of the SSR render
+      await retry(async () => {
+        expect(rscRequests.filter((req) => req === '/static-page').length).toBe(
+          0
+        )
+      })
+
+      // navigate to index
+      await browser.elementByCss('[href="/"]').click()
+
+      // we should be on the index page
+      await browser.waitForElementByCss('#to-dashboard')
+
+      // navigate to the static page
+      await browser.elementByCss('[href="/static-page"]').click()
+
+      // we should be on the static page
+      await browser.waitForElementByCss('#static-page')
+
+      await browser.waitForIdleNetwork()
+
+      // We still shouldn't see any requests since it respects the static staletime (default 5m)
+      await retry(async () => {
+        expect(rscRequests.filter((req) => req === '/static-page').length).toBe(
+          0
+        )
+      })
+    })
+
+    it('should not re-fetch the initial dynamic page if the same page is prefetched with prefetch={true}', async () => {
+      const rscRequests = []
+      const browser = await next.browser('/dynamic-page', {
+        beforePageLoad(page) {
+          page.on('request', async (req) => {
+            const url = new URL(req.url())
+            if (url.pathname === '/dynamic-page' || url.pathname === '/') {
+              const headers = await req.allHeaders()
+              if (headers['rsc']) {
+                rscRequests.push(url.pathname)
+              }
+            }
+          })
+        },
+      })
+
+      expect(
+        await browser.hasElementByCssSelector('[href="/dynamic-page"]')
+      ).toBe(true)
+
+      // sanity check: we should see a prefetch request to the root page
+      await retry(async () => {
+        expect(rscRequests.filter((req) => req === '/').length).toBe(1)
+      })
+
+      // We shouldn't see any requests to the dynamic page since the prefetch cache was seeded as part of the SSR render
+      await retry(async () => {
+        expect(
+          rscRequests.filter((req) => req === '/dynamic-page').length
+        ).toBe(0)
+      })
+
+      // navigate to index
+      await browser.elementByCss('[href="/"]').click()
+
+      // we should be on the index page
+      await browser.waitForElementByCss('#to-dashboard')
+
+      // navigate to the dynamic page
+      await browser.elementByCss('[href="/dynamic-page"]').click()
+
+      // we should be on the dynamic page
+      await browser.waitForElementByCss('#dynamic-page')
+
+      await browser.waitForIdleNetwork()
+
+      // We should see a request for the dynamic page since it respects the dynamic staletime (default 0)
+      await retry(async () => {
+        expect(
+          rscRequests.filter((req) => req === '/dynamic-page').length
+        ).toBe(1)
+      })
+    })
   })
 
   // These tests are skipped when deployed as they rely on runtime logs
@@ -383,8 +584,8 @@ describe('app dir - prefetching', () => {
     it('should prefetch links in viewport with low priority', async () => {
       const requests: { priority: string; url: string }[] = []
       const browser = await next.browser('/', {
-        beforePageLoad(page: Page) {
-          page.on('request', async (req: Request) => {
+        beforePageLoad(page) {
+          page.on('request', async (req) => {
             const url = new URL(req.url())
             const headers = await req.allHeaders()
             if (headers['rsc']) {
@@ -408,8 +609,8 @@ describe('app dir - prefetching', () => {
     it('should prefetch with high priority when navigating to a page without a prefetch entry', async () => {
       const requests: { priority: string; url: string }[] = []
       const browser = await next.browser('/prefetch-false/initial', {
-        beforePageLoad(page: Page) {
-          page.on('request', async (req: Request) => {
+        beforePageLoad(page) {
+          page.on('request', async (req) => {
             const url = new URL(req.url())
             const headers = await req.allHeaders()
             if (headers['rsc']) {
@@ -436,8 +637,8 @@ describe('app dir - prefetching', () => {
     it('should have an auto priority for all other fetch operations', async () => {
       const requests: { priority: string; url: string }[] = []
       const browser = await next.browser('/', {
-        beforePageLoad(page: Page) {
-          page.on('request', async (req: Request) => {
+        beforePageLoad(page) {
+          page.on('request', async (req) => {
             const url = new URL(req.url())
             const headers = await req.allHeaders()
             if (headers['rsc']) {
@@ -467,8 +668,8 @@ describe('app dir - prefetching', () => {
       let interceptRequests = false
 
       const browser = await next.browser('/prefetch-race', {
-        beforePageLoad(page: Page) {
-          page.route('**/force-dynamic/**', async (route: Route) => {
+        beforePageLoad(page) {
+          page.route('**/force-dynamic/**', async (route) => {
             if (!interceptRequests) {
               return route.continue()
             }

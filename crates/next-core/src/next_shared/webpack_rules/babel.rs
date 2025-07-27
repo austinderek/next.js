@@ -1,5 +1,6 @@
 use anyhow::Result;
-use turbo_tasks::{Value, Vc};
+use turbo_rcstr::rcstr;
+use turbo_tasks::{ResolvedVc, Vc};
 use turbo_tasks_fs::{self, FileSystemEntryType, FileSystemPath};
 use turbopack::module_options::{LoaderRuleItem, OptionWebpackRules, WebpackRules};
 use turbopack_core::{
@@ -26,13 +27,13 @@ const BABEL_CONFIG_FILES: &[&str] = &[
 /// webpack loader for each eligible file type if it doesn't already exist.
 #[turbo_tasks::function]
 pub async fn maybe_add_babel_loader(
-    project_root: Vc<FileSystemPath>,
-    webpack_rules: Option<Vc<WebpackRules>>,
+    project_root: FileSystemPath,
+    webpack_rules: Option<ResolvedVc<WebpackRules>>,
 ) -> Result<Vc<OptionWebpackRules>> {
     let has_babel_config = {
         let mut has_babel_config = false;
         for &filename in BABEL_CONFIG_FILES {
-            let filetype = *project_root.join(filename.into()).get_type().await?;
+            let filetype = *project_root.join(filename)?.get_type().await?;
             if matches!(filetype, FileSystemEntryType::File) {
                 has_babel_config = true;
                 break;
@@ -43,7 +44,7 @@ pub async fn maybe_add_babel_loader(
 
     if has_babel_config {
         let mut rules = if let Some(webpack_rules) = webpack_rules {
-            webpack_rules.await?.clone_value()
+            webpack_rules.owned().await?
         } else {
             Default::default()
         };
@@ -62,40 +63,40 @@ pub async fn maybe_add_babel_loader(
 
             if !has_babel_loader {
                 if !has_emitted_babel_resolve_issue
-                    && !*is_babel_loader_available(project_root).await?
+                    && !*is_babel_loader_available(project_root.clone()).await?
                 {
                     BabelIssue {
-                        path: project_root,
-                        title: StyledString::Text(
-                            "Unable to resolve babel-loader, but a babel config is present".into(),
-                        )
-                        .cell(),
-                        description: StyledString::Text(
-                            "Make sure babel-loader is installed via your package manager.".into(),
-                        )
-                        .cell(),
-                        severity: IssueSeverity::Fatal.cell(),
+                        path: project_root.clone(),
+                        title: StyledString::Text(rcstr!(
+                            "Unable to resolve babel-loader, but a babel config is present"
+                        ))
+                        .resolved_cell(),
+                        description: StyledString::Text(rcstr!(
+                            "Make sure babel-loader is installed via your package manager."
+                        ))
+                        .resolved_cell(),
+                        severity: IssueSeverity::Fatal,
                     }
-                    .cell()
+                    .resolved_cell()
                     .emit();
 
                     has_emitted_babel_resolve_issue = true;
                 }
 
                 let loader = WebpackLoaderItem {
-                    loader: "babel-loader".into(),
+                    loader: rcstr!("babel-loader"),
                     options: Default::default(),
                 };
                 if let Some(rule) = rule {
-                    let mut loaders = rule.loaders.await?.clone_value();
+                    let mut loaders = rule.loaders.owned().await?;
                     loaders.push(loader);
-                    rule.loaders = Vc::cell(loaders);
+                    rule.loaders = ResolvedVc::cell(loaders);
                 } else {
                     rules.insert(
                         pattern.into(),
                         LoaderRuleItem {
-                            loaders: Vc::cell(vec![loader]),
-                            rename_as: Some("*".into()),
+                            loaders: ResolvedVc::cell(vec![loader]),
+                            rename_as: Some(rcstr!("*")),
                         },
                     );
                 }
@@ -104,20 +105,18 @@ pub async fn maybe_add_babel_loader(
         }
 
         if has_changed {
-            return Ok(Vc::cell(Some(Vc::cell(rules))));
+            return Ok(Vc::cell(Some(ResolvedVc::cell(rules))));
         }
     }
     Ok(Vc::cell(webpack_rules))
 }
 
 #[turbo_tasks::function]
-pub async fn is_babel_loader_available(project_path: Vc<FileSystemPath>) -> Result<Vc<bool>> {
+pub async fn is_babel_loader_available(project_path: FileSystemPath) -> Result<Vc<bool>> {
     let result = resolve(
-        project_path,
-        Value::new(ReferenceType::CommonJs(CommonJsReferenceSubType::Undefined)),
-        Request::parse(Value::new(Pattern::Constant(
-            "babel-loader/package.json".into(),
-        ))),
+        project_path.clone(),
+        ReferenceType::CommonJs(CommonJsReferenceSubType::Undefined),
+        Request::parse(Pattern::Constant("babel-loader/package.json".into())),
         node_cjs_resolve_options(project_path),
     );
     let assets = result.primary_sources().await?;
@@ -126,10 +125,10 @@ pub async fn is_babel_loader_available(project_path: Vc<FileSystemPath>) -> Resu
 
 #[turbo_tasks::value]
 struct BabelIssue {
-    path: Vc<FileSystemPath>,
-    title: Vc<StyledString>,
-    description: Vc<StyledString>,
-    severity: Vc<IssueSeverity>,
+    path: FileSystemPath,
+    title: ResolvedVc<StyledString>,
+    description: ResolvedVc<StyledString>,
+    severity: IssueSeverity,
 }
 
 #[turbo_tasks::value_impl]
@@ -139,19 +138,18 @@ impl Issue for BabelIssue {
         IssueStage::Transform.into()
     }
 
-    #[turbo_tasks::function]
-    fn severity(&self) -> Vc<IssueSeverity> {
+    fn severity(&self) -> IssueSeverity {
         self.severity
     }
 
     #[turbo_tasks::function]
     fn file_path(&self) -> Vc<FileSystemPath> {
-        self.path
+        self.path.clone().cell()
     }
 
     #[turbo_tasks::function]
     fn title(&self) -> Vc<StyledString> {
-        self.title
+        *self.title
     }
 
     #[turbo_tasks::function]

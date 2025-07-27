@@ -5,6 +5,7 @@ import cheerio from 'cheerio'
 import { createNext, FileRef } from 'e2e-utils'
 import { NextInstance } from 'e2e-utils'
 import {
+  createNowRouteMatches,
   fetchViaHTTP,
   findPort,
   initNextServerScript,
@@ -18,6 +19,7 @@ describe('required server files app router', () => {
   let appPort: number | string
   let delayedPostpone
   let rewritePostpone
+  let cliOutput = ''
 
   const setupNext = async ({
     nextEnv,
@@ -28,6 +30,7 @@ describe('required server files app router', () => {
   }) => {
     // test build against environment with next support
     process.env.NOW_BUILDER = nextEnv ? '1' : ''
+    process.env.NEXT_PRIVATE_TEST_HEADERS = '1'
 
     next = await createNext({
       files: {
@@ -44,7 +47,6 @@ describe('required server files app router', () => {
         cacheHandler: './cache-handler.js',
         experimental: {
           ppr: true,
-          pprFallbacks: true,
         },
         eslint: {
           ignoreDuringBuilds: true,
@@ -100,6 +102,12 @@ describe('required server files app router', () => {
       undefined,
       {
         cwd: next.testDir,
+        onStderr(data) {
+          cliOutput += data
+        },
+        onStdout(data) {
+          cliOutput += data
+        },
       }
     )
   }
@@ -108,6 +116,7 @@ describe('required server files app router', () => {
     await setupNext({ nextEnv: true, minimalMode: true })
   })
   afterAll(async () => {
+    delete process.env.NEXT_PRIVATE_TEST_HEADERS
     await next.destroy()
     if (server) await killApp(server)
   })
@@ -116,21 +125,44 @@ describe('required server files app router', () => {
     expect(next.cliOutput).not.toContain('ERR_INVALID_URL')
   })
 
-  it.each([
-    {
-      name: 'with Next-Resume',
+  // this enables client segment cache in CI
+  if (process.env.__NEXT_EXPERIMENTAL_PPR) {
+    it('should de-dupe client segment tree revalidate requests', async () => {
+      const { segmentPaths } = await next.readJSON(
+        'standalone/.next/server/app/isr/first.meta'
+      )
+      const outputIdx = cliOutput.length
+
+      for (const segmentPath of segmentPaths) {
+        const outputSegmentPath =
+          join('/isr/[slug].segments', segmentPath) + '.segment.rsc'
+
+        require('console').error('requesting', outputSegmentPath)
+
+        const res = await fetchViaHTTP(appPort, outputSegmentPath, undefined, {
+          headers: {
+            'x-matched-path': '/isr/[slug].segments/_tree.segment.rsc',
+            'x-now-route-matches': 'slug=first&1=first',
+          },
+        })
+
+        expect(res.status).toBe(200)
+        expect(res.headers.get('content-type')).toBe('text/x-component')
+      }
+
+      expect(
+        cliOutput.substring(outputIdx).match(/rendering \/isr\/\[slug\]/g)
+          .length
+      ).toBe(1)
+    })
+  }
+
+  it('should properly stream resume with Next-Resume', async () => {
+    const res = await fetchViaHTTP(appPort, '/delayed', undefined, {
       headers: {
         'x-matched-path': '/delayed',
         'next-resume': '1',
       },
-    },
-    {
-      name: 'without Next-Resume',
-      headers: { 'x-matched-path': '/_next/postponed/resume/delayed' },
-    },
-  ])('should properly stream resume $name', async ({ headers }) => {
-    const res = await fetchViaHTTP(appPort, '/delayed', undefined, {
-      headers,
       method: 'POST',
       body: delayedPostpone,
     })
@@ -190,7 +222,9 @@ describe('required server files app router', () => {
       headers: {
         'user-agent':
           'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.179 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-        'x-now-route-matches': '1=second&nxtPslug=new',
+        'x-now-route-matches': createNowRouteMatches({
+          slug: 'new',
+        }).toString(),
         'x-matched-path': '/isr/[slug]',
       },
     })
@@ -205,7 +239,9 @@ describe('required server files app router', () => {
       headers: {
         'user-agent':
           'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.179 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-        'x-now-route-matches': '1=second&nxtPslug=new',
+        'x-now-route-matches': createNowRouteMatches({
+          slug: 'new',
+        }).toString(),
         'x-matched-path': '/isr/[slug]',
       },
     })
@@ -214,21 +250,7 @@ describe('required server files app router', () => {
   })
 
   describe('middleware rewrite', () => {
-    it.each([
-      {
-        name: 'with Next-Resume',
-        headers: {
-          'x-matched-path': '/rewrite/first-cookie',
-          'next-resume': '1',
-        },
-      },
-      {
-        name: 'without Next-Resume',
-        headers: {
-          'x-matched-path': '/_next/postponed/resume/rewrite/first-cookie',
-        },
-      },
-    ])('should work with a dynamic path ($name)', async ({ headers }) => {
+    it('should work with a dynamic path with Next-Resume', async () => {
       const res = await fetchViaHTTP(
         appPort,
         '/rewrite-with-cookie',
@@ -252,59 +274,45 @@ describe('required server files app router', () => {
     })
   })
 
-  it.each([
-    {
-      name: 'with Next-Resume',
-      headers: () => ({
+  it('should still render when postponed is corrupted with Next-Resume', async () => {
+    const random = Math.random().toString(36).substring(2)
+
+    const res = await fetchViaHTTP(appPort, '/dyn/' + random, undefined, {
+      method: 'POST',
+      headers: {
         'x-matched-path': '/dyn/[slug]',
         'next-resume': '1',
-      }),
-    },
-    {
-      name: 'without Next-Resume',
-      headers: (random) => ({
-        'x-matched-path': '/_next/postponed/resume/dyn/' + random,
-      }),
-    },
-  ])(
-    'should still render when postponed is corrupted $name',
-    async ({ headers }) => {
-      const random = Math.random().toString(36).substring(2)
+      },
+      // This is a corrupted postponed JSON payload.
+      body: '{',
+    })
 
-      const res = await fetchViaHTTP(appPort, '/dyn/' + random, undefined, {
-        method: 'POST',
-        headers: headers(random),
-        // This is a corrupted postponed JSON payload.
-        body: '{',
-      })
+    expect(res.status).toBe(200)
 
-      expect(res.status).toBe(200)
+    const html = await res.text()
 
-      const html = await res.text()
-
-      // Expect that the closing HTML tag is still present, indicating a
-      // successful render.
-      expect(html).toContain('</html>')
-    }
-  )
+    // Expect that the closing HTML tag is still present, indicating a
+    // successful render.
+    expect(html).toContain('</html>')
+  })
 
   it('should send cache tags in minimal mode for ISR', async () => {
     for (const [path, tags] of [
       [
         '/isr/first',
-        'isr-page,_N_T_/layout,_N_T_/isr/layout,_N_T_/isr/[slug]/layout,_N_T_/isr/[slug]/page,_N_T_/isr/first',
+        '_N_T_/layout,_N_T_/isr/layout,_N_T_/isr/[slug]/layout,_N_T_/isr/[slug]/page,_N_T_/isr/first,isr-page',
       ],
       [
         '/isr/second',
-        'isr-page,_N_T_/layout,_N_T_/isr/layout,_N_T_/isr/[slug]/layout,_N_T_/isr/[slug]/page,_N_T_/isr/second',
+        '_N_T_/layout,_N_T_/isr/layout,_N_T_/isr/[slug]/layout,_N_T_/isr/[slug]/page,_N_T_/isr/second,isr-page',
       ],
       [
         '/api/isr/first',
-        'isr-page,_N_T_/layout,_N_T_/api/layout,_N_T_/api/isr/layout,_N_T_/api/isr/[slug]/layout,_N_T_/api/isr/[slug]/route,_N_T_/api/isr/first',
+        '_N_T_/layout,_N_T_/api/layout,_N_T_/api/isr/layout,_N_T_/api/isr/[slug]/layout,_N_T_/api/isr/[slug]/route,_N_T_/api/isr/first,isr-page',
       ],
       [
         '/api/isr/second',
-        'isr-page,_N_T_/layout,_N_T_/api/layout,_N_T_/api/isr/layout,_N_T_/api/isr/[slug]/layout,_N_T_/api/isr/[slug]/route,_N_T_/api/isr/second',
+        '_N_T_/layout,_N_T_/api/layout,_N_T_/api/isr/layout,_N_T_/api/isr/[slug]/layout,_N_T_/api/isr/[slug]/route,_N_T_/api/isr/second,isr-page',
       ],
     ]) {
       require('console').error('checking', { path, tags })
@@ -386,6 +394,7 @@ describe('required server files app router', () => {
         'x-matched-path': '/postpone/isr/[slug]',
         // We don't include the `x-now-route-matches` header because we want to
         // test that the fallback route params are correctly set.
+        'x-now-route-matches': '',
       },
     })
 

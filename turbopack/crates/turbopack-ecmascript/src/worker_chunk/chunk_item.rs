@@ -1,61 +1,46 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use indoc::formatdoc;
-use turbo_tasks::{RcStr, TryJoinIterExt, Value, ValueToString, Vc};
+use turbo_rcstr::rcstr;
+use turbo_tasks::{ResolvedVc, TryJoinIterExt, Vc};
 use turbopack_core::{
     chunk::{
-        availability_info::AvailabilityInfo, ChunkData, ChunkItem, ChunkType, ChunkingContext,
-        ChunkingContextExt, ChunksData, EvaluatableAsset, EvaluatableAssets,
+        ChunkData, ChunkItem, ChunkType, ChunkingContext, ChunkingContextExt, ChunksData,
+        availability_info::AvailabilityInfo,
     },
     ident::AssetIdent,
     module::Module,
+    module_graph::{ModuleGraph, chunk_group_info::ChunkGroup},
     output::OutputAssets,
-    reference::{ModuleReferences, SingleOutputAssetReference},
 };
 
 use super::module::WorkerLoaderModule;
 use crate::{
     chunk::{
-        data::EcmascriptChunkData, EcmascriptChunkItem, EcmascriptChunkItemContent,
-        EcmascriptChunkType,
+        EcmascriptChunkItem, EcmascriptChunkItemContent, EcmascriptChunkType,
+        data::EcmascriptChunkData,
     },
+    runtime_functions::{TURBOPACK_EXPORT_VALUE, TURBOPACK_WORKER_BLOB_URL},
     utils::StringifyJs,
 };
 
 #[turbo_tasks::value(shared)]
 pub struct WorkerLoaderChunkItem {
-    pub module: Vc<WorkerLoaderModule>,
-    pub chunking_context: Vc<Box<dyn ChunkingContext>>,
-}
-
-#[turbo_tasks::function]
-pub fn worker_modifier() -> Vc<RcStr> {
-    Vc::cell("worker".into())
+    pub module: ResolvedVc<WorkerLoaderModule>,
+    pub module_graph: ResolvedVc<ModuleGraph>,
+    pub chunking_context: ResolvedVc<Box<dyn ChunkingContext>>,
 }
 
 #[turbo_tasks::value_impl]
 impl WorkerLoaderChunkItem {
     #[turbo_tasks::function]
-    async fn chunks(self: Vc<Self>) -> Result<Vc<OutputAssets>> {
-        let this = self.await?;
-        let module = this.module.await?;
+    async fn chunks(&self) -> Result<Vc<OutputAssets>> {
+        let module = self.module.await?;
 
-        let Some(evaluatable) =
-            Vc::try_resolve_downcast::<Box<dyn EvaluatableAsset>>(module.inner).await?
-        else {
-            bail!(
-                "{} is not evaluatable for Worker loader module",
-                module.inner.ident().to_string().await?
-            );
-        };
-
-        Ok(this.chunking_context.evaluated_chunk_group_assets(
-            AssetIdent::from_path(
-                this.chunking_context
-                    .chunk_path(module.inner.ident(), ".js".into()),
-            )
-            .with_modifier(worker_modifier()),
-            EvaluatableAssets::empty().with_entry(evaluatable),
-            Value::new(AvailabilityInfo::Root),
+        Ok(self.chunking_context.evaluated_chunk_group_assets(
+            module.inner.ident().with_modifier(rcstr!("worker")),
+            ChunkGroup::Isolated(ResolvedVc::upcast(module.inner)),
+            *self.module_graph,
+            AvailabilityInfo::Root,
         ))
     }
 
@@ -63,7 +48,7 @@ impl WorkerLoaderChunkItem {
     async fn chunks_data(self: Vc<Self>) -> Result<Vc<ChunksData>> {
         let this = self.await?;
         Ok(ChunkData::from_assets(
-            this.chunking_context.output_root(),
+            this.chunking_context.output_root().owned().await?,
             self.chunks(),
         ))
     }
@@ -71,11 +56,6 @@ impl WorkerLoaderChunkItem {
 
 #[turbo_tasks::value_impl]
 impl EcmascriptChunkItem for WorkerLoaderChunkItem {
-    #[turbo_tasks::function]
-    fn chunking_context(&self) -> Vc<Box<dyn ChunkingContext>> {
-        self.chunking_context
-    }
-
     #[turbo_tasks::function]
     async fn content(self: Vc<Self>) -> Result<Vc<EcmascriptChunkItemContent>> {
         let chunks_data = self.chunks_data().await?;
@@ -87,7 +67,7 @@ impl EcmascriptChunkItem for WorkerLoaderChunkItem {
 
         let code = formatdoc! {
             r#"
-                __turbopack_export_value__(__turbopack_worker_blob_url__({chunks:#}));
+                {TURBOPACK_EXPORT_VALUE}({TURBOPACK_WORKER_BLOB_URL}({chunks:#}));
             "#,
             chunks = StringifyJs(&chunks_data),
         };
@@ -100,11 +80,6 @@ impl EcmascriptChunkItem for WorkerLoaderChunkItem {
     }
 }
 
-#[turbo_tasks::function]
-fn chunk_reference_description() -> Vc<RcStr> {
-    Vc::cell("worker chunk".into())
-}
-
 #[turbo_tasks::value_impl]
 impl ChunkItem for WorkerLoaderChunkItem {
     #[turbo_tasks::function]
@@ -113,32 +88,18 @@ impl ChunkItem for WorkerLoaderChunkItem {
     }
 
     #[turbo_tasks::function]
-    async fn content_ident(&self) -> Result<Vc<AssetIdent>> {
-        Ok(self.module.ident())
+    fn content_ident(&self) -> Vc<AssetIdent> {
+        self.module.ident()
     }
 
     #[turbo_tasks::function]
-    async fn references(self: Vc<Self>) -> Result<Vc<ModuleReferences>> {
-        let chunks = self.chunks();
-
-        Ok(Vc::cell(
-            chunks
-                .await?
-                .iter()
-                .copied()
-                .map(|chunk| {
-                    Vc::upcast(SingleOutputAssetReference::new(
-                        chunk,
-                        chunk_reference_description(),
-                    ))
-                })
-                .collect(),
-        ))
+    fn references(self: Vc<Self>) -> Vc<OutputAssets> {
+        self.chunks()
     }
 
     #[turbo_tasks::function]
-    async fn chunking_context(&self) -> Vc<Box<dyn ChunkingContext>> {
-        Vc::upcast(self.chunking_context)
+    fn chunking_context(&self) -> Vc<Box<dyn ChunkingContext>> {
+        *ResolvedVc::upcast(self.chunking_context)
     }
 
     #[turbo_tasks::function]
@@ -150,6 +111,6 @@ impl ChunkItem for WorkerLoaderChunkItem {
 
     #[turbo_tasks::function]
     fn module(&self) -> Vc<Box<dyn Module>> {
-        Vc::upcast(self.module)
+        *ResolvedVc::upcast(self.module)
     }
 }

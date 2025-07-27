@@ -19,11 +19,9 @@ pub struct CodeGeneration {
 
 #[turbo_tasks::value_trait]
 pub trait CodeGenerateable {
+    #[turbo_tasks::function]
     fn code_generation(
         self: Vc<Self>,
         chunking_context: Vc<Box<dyn ChunkingContext>>,
     ) -> Vc<CodeGeneration>;
 }
-
-#[turbo_tasks::value(transparent)]
-pub struct CodeGenerateables(Vec<Vc<Box<dyn CodeGenerateable>>>);

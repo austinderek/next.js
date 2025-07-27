@@ -1,20 +1,18 @@
-import type { WriteFileOptions } from 'fs'
 import type { RenderOptsPartial as AppRenderOptsPartial } from '../server/app-render/types'
 import type { RenderOptsPartial as PagesRenderOptsPartial } from '../server/render'
 import type { LoadComponentsReturnType } from '../server/load-components'
 import type { OutgoingHttpHeaders } from 'http'
 import type AmpHtmlValidator from 'next/dist/compiled/amphtml-validator'
 import type { ExportPathMap, NextConfigComplete } from '../server/config-shared'
-import type { Revalidate } from '../server/lib/revalidate'
-import type {
-  NextEnabledDirectories,
-  RequestLifecycleOpts,
-} from '../server/base-server'
+import type { CacheControl } from '../server/lib/cache-control'
+import type { NextEnabledDirectories } from '../server/base-server'
 import type {
   SerializableTurborepoAccessTraceResult,
   TurborepoAccessTraceResult,
 } from '../build/turborepo-access-trace'
 import type { FetchMetrics } from '../server/base-http'
+import type { RouteMetadata } from './routes/types'
+import type { RenderResumeDataCache } from '../server/resume-data-cache/resume-data-cache'
 
 export interface AmpValidation {
   page: string
@@ -24,25 +22,13 @@ export interface AmpValidation {
   }
 }
 
-/**
- * Writes a file to the filesystem (and also records the file that was written).
- */
-export type FileWriter = (
-  type: string,
-  path: string,
-  content:
-    | string
-    | NodeJS.ArrayBufferView
-    | Iterable<string | NodeJS.ArrayBufferView>
-    | AsyncIterable<string | NodeJS.ArrayBufferView>,
-  encodingOptions?: WriteFileOptions
-) => Promise<void>
-
-type PathMap = ExportPathMap[keyof ExportPathMap]
+export type ExportPathEntry = ExportPathMap[keyof ExportPathMap] & {
+  path: string
+}
 
 export interface ExportPagesInput {
-  paths: string[]
-  exportPathMap: ExportPathMap
+  buildId: string
+  exportPaths: ExportPathEntry[]
   parentSpanId: number
   dir: string
   distDir: string
@@ -55,11 +41,12 @@ export interface ExportPagesInput {
   cacheHandler: string | undefined
   fetchCacheKeyPrefix: string | undefined
   options: ExportAppOptions
+  renderResumeDataCachesByPage: Record<string, string> | undefined
 }
 
 export interface ExportPageInput {
-  path: string
-  pathMap: PathMap
+  buildId: string
+  exportPath: ExportPathEntry
   distDir: string
   outDir: string
   pagesDataDir: string
@@ -76,32 +63,26 @@ export interface ExportPageInput {
   debugOutput?: boolean
   nextConfigOutput?: NextConfigComplete['output']
   enableExperimentalReact?: boolean
-}
-
-export type ExportedPageFile = {
-  type: string
-  path: string
+  sriEnabled: boolean
+  renderResumeDataCache: RenderResumeDataCache | undefined
 }
 
 export type ExportRouteResult =
   | {
       ampValidations?: AmpValidation[]
-      revalidate: Revalidate
-      metadata?: {
-        status?: number
-        headers?: OutgoingHttpHeaders
-      }
+      cacheControl: CacheControl
+      metadata?: Partial<RouteMetadata>
       ssgNotFound?: boolean
-      hasEmptyPrelude?: boolean
+      hasEmptyStaticShell?: boolean
       hasPostponed?: boolean
       fetchMetrics?: FetchMetrics
+      renderResumeDataCache?: string
     }
   | {
       error: boolean
     }
 
 export type ExportPageResult = ExportRouteResult & {
-  files: ExportedPageFile[]
   duration: number
   turborepoAccessTraceResult?: SerializableTurborepoAccessTraceResult
 }
@@ -109,6 +90,7 @@ export type ExportPageResult = ExportRouteResult & {
 export type ExportPagesResult = {
   result: ExportPageResult | undefined
   path: string
+  page: string
   pageKey: string
 }[]
 
@@ -116,7 +98,6 @@ export type WorkerRenderOptsPartial = PagesRenderOptsPartial &
   AppRenderOptsPartial
 
 export type WorkerRenderOpts = WorkerRenderOptsPartial &
-  RequestLifecycleOpts &
   LoadComponentsReturnType
 
 export interface ExportAppOptions {
@@ -124,6 +105,7 @@ export interface ExportAppOptions {
   enabledDirectories: NextEnabledDirectories
   silent?: boolean
   debugOutput?: boolean
+  debugPrerender?: boolean
   pages?: string[]
   buildExport: boolean
   statusMessage?: string
@@ -151,17 +133,17 @@ export type ExportAppResult = {
     string,
     {
       /**
-       * The revalidation time for the page in seconds.
+       * The cache control for the page.
        */
-      revalidate?: Revalidate
+      cacheControl?: CacheControl
       /**
        * The metadata for the page.
        */
-      metadata?: { status?: number; headers?: OutgoingHttpHeaders }
+      metadata?: Partial<RouteMetadata>
       /**
-       * If the page has an empty prelude when using PPR.
+       * If the page has an empty static shell when using PPR.
        */
-      hasEmptyPrelude?: boolean
+      hasEmptyStaticShell?: boolean
       /**
        * If the page has postponed when using PPR.
        */

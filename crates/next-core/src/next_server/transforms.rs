@@ -1,7 +1,9 @@
 use anyhow::Result;
 use next_custom_transforms::transforms::strip_page_exports::ExportFilter;
-use turbo_tasks::Vc;
-use turbopack::module_options::ModuleRule;
+use turbo_rcstr::RcStr;
+use turbo_tasks::{ResolvedVc, Vc};
+use turbopack::module_options::{ModuleRule, ModuleRuleEffect, RuleCondition};
+use turbopack_core::reference_type::{ReferenceType, UrlReferenceSubType};
 
 use crate::{
     mode::NextMode,
@@ -9,7 +11,8 @@ use crate::{
     next_server::context::ServerContextType,
     next_shared::transforms::{
         get_next_dynamic_transform_rule, get_next_font_transform_rule, get_next_image_rule,
-        get_next_modularize_imports_rule, get_next_pages_transforms_rule,
+        get_next_lint_transform_rule, get_next_modularize_imports_rule,
+        get_next_pages_transforms_rule, get_next_track_dynamic_imports_transform_rule,
         get_server_actions_transform_rule, next_amp_attributes::get_next_amp_attr_rule,
         next_cjs_optimizer::get_next_cjs_optimizer_rule,
         next_disallow_re_export_all_in_page::get_next_disallow_export_all_in_page_rule,
@@ -29,12 +32,16 @@ pub async fn get_next_server_transforms_rules(
     mode: Vc<NextMode>,
     foreign_code: bool,
     next_runtime: NextRuntime,
+    encryption_key: ResolvedVc<RcStr>,
 ) -> Result<Vec<ModuleRule>> {
     let mut rules = vec![];
 
-    let modularize_imports_config = &next_config.await?.modularize_imports;
+    let modularize_imports_config = &next_config.modularize_imports().await?;
     let mdx_rs = next_config.mdx_rs().await?.is_some();
-    if let Some(modularize_imports_config) = modularize_imports_config {
+
+    rules.push(get_next_lint_transform_rule(mdx_rs));
+
+    if !modularize_imports_config.is_empty() {
         rules.push(get_next_modularize_imports_rule(
             modularize_imports_config,
             mdx_rs,
@@ -42,22 +49,58 @@ pub async fn get_next_server_transforms_rules(
     }
     rules.push(get_next_font_transform_rule(mdx_rs));
 
+    if !matches!(context_ty, ServerContextType::AppRSC { .. }) {
+        rules.extend([
+            // Ignore the internal ModuleCssAsset -> CssModuleAsset references
+            // The CSS Module module itself is still needed for class names
+            ModuleRule::new_internal(
+                RuleCondition::any(vec![
+                    RuleCondition::ResourcePathEndsWith(".module.css".into()),
+                    RuleCondition::ContentTypeStartsWith("text/css+module".into()),
+                ]),
+                vec![ModuleRuleEffect::Ignore],
+            ),
+        ]);
+        rules.extend([
+            // Ignore all non-module CSS references
+            ModuleRule::new(
+                RuleCondition::any(vec![
+                    RuleCondition::all(vec![
+                        RuleCondition::ResourcePathEndsWith(".css".into()),
+                        RuleCondition::not(RuleCondition::ResourcePathEndsWith(
+                            ".module.css".into(),
+                        )),
+                    ]),
+                    RuleCondition::all(vec![
+                        RuleCondition::ContentTypeStartsWith("text/css".into()),
+                        RuleCondition::not(RuleCondition::ContentTypeStartsWith(
+                            "text/css+module".into(),
+                        )),
+                    ]),
+                ]),
+                vec![ModuleRuleEffect::Ignore],
+            ),
+        ]);
+    }
+
     if !foreign_code {
         rules.push(get_next_page_static_info_assert_rule(
             mdx_rs,
-            Some(context_ty),
+            Some(context_ty.clone()),
             None,
         ));
     }
 
+    let use_cache_enabled = *next_config.enable_use_cache().await?;
+    let cache_kinds = next_config.cache_kinds().to_resolved().await?;
     let mut is_app_dir = false;
 
-    let is_server_components = match context_ty {
+    let is_server_components = match &context_ty {
         ServerContextType::Pages { pages_dir } | ServerContextType::PagesApi { pages_dir } => {
             if !foreign_code {
                 rules.push(get_next_disallow_export_all_in_page_rule(
                     mdx_rs,
-                    pages_dir.await?,
+                    pages_dir.clone(),
                 ));
             }
             false
@@ -66,7 +109,7 @@ pub async fn get_next_server_transforms_rules(
             if !foreign_code {
                 rules.push(
                     get_next_pages_transforms_rule(
-                        pages_dir,
+                        pages_dir.clone(),
                         ExportFilter::StripDefaultExport,
                         mdx_rs,
                     )
@@ -74,7 +117,7 @@ pub async fn get_next_server_transforms_rules(
                 );
                 rules.push(get_next_disallow_export_all_in_page_rule(
                     mdx_rs,
-                    pages_dir.await?,
+                    pages_dir.clone(),
                 ));
             }
             false
@@ -82,30 +125,67 @@ pub async fn get_next_server_transforms_rules(
         ServerContextType::AppSSR { .. } => {
             // Yah, this is SSR, but this is still treated as a Client transform layer.
             // need to apply to foreign code too
-            rules.push(get_server_actions_transform_rule(
-                ActionsTransform::Client,
-                mdx_rs,
-            ));
+            rules.push(
+                get_server_actions_transform_rule(
+                    mode,
+                    ActionsTransform::Client,
+                    encryption_key,
+                    mdx_rs,
+                    use_cache_enabled,
+                    cache_kinds,
+                )
+                .await?,
+            );
+
             is_app_dir = true;
 
             false
         }
         ServerContextType::AppRSC { .. } => {
-            rules.push(get_server_actions_transform_rule(
-                ActionsTransform::Server,
-                mdx_rs,
-            ));
+            rules.push(
+                get_server_actions_transform_rule(
+                    mode,
+                    ActionsTransform::Server,
+                    encryption_key,
+                    mdx_rs,
+                    use_cache_enabled,
+                    cache_kinds,
+                )
+                .await?,
+            );
 
             is_app_dir = true;
 
             true
         }
         ServerContextType::AppRoute { .. } => {
+            rules.push(
+                get_server_actions_transform_rule(
+                    mode,
+                    ActionsTransform::Server,
+                    encryption_key,
+                    mdx_rs,
+                    use_cache_enabled,
+                    cache_kinds,
+                )
+                .await?,
+            );
+
             is_app_dir = true;
+
             false
         }
         ServerContextType::Middleware { .. } | ServerContextType::Instrumentation { .. } => false,
     };
+
+    if is_app_dir &&
+        // `cacheComponents` is not supported in the edge runtime.
+        // (also, the code generated by the dynamic imports transform relies on `CacheSignal`, which uses nodejs-specific APIs)
+        next_runtime != NextRuntime::Edge &&
+        *next_config.enable_cache_components().await?
+    {
+        rules.push(get_next_track_dynamic_imports_transform_rule(mdx_rs));
+    }
 
     if !foreign_code {
         rules.push(
@@ -122,7 +202,7 @@ pub async fn get_next_server_transforms_rules(
         // rules.push(get_next_optimize_server_react_rule(enable_mdx_rs,
         // optimize_use_state))
 
-        rules.push(get_next_image_rule());
+        rules.push(get_next_image_rule().await?);
     }
 
     if let NextRuntime::Edge = next_runtime {
@@ -134,6 +214,31 @@ pub async fn get_next_server_transforms_rules(
                 matches!(context_ty, ServerContextType::Middleware { .. })
                     && matches!(*mode.await?, NextMode::Build),
                 matches!(*mode.await?, NextMode::Build),
+            ));
+        }
+
+        if matches!(context_ty, ServerContextType::AppRoute { .. }) {
+            // Ignore static asset imports in Edge routes, these are really intended for the client
+            // (i.e. for pages), while still allowing `new URL(..., import.meta.url)`
+            rules.push(ModuleRule::new(
+                RuleCondition::all(vec![
+                    RuleCondition::not(RuleCondition::ReferenceType(ReferenceType::Url(
+                        UrlReferenceSubType::Undefined,
+                    ))),
+                    RuleCondition::any(vec![
+                        RuleCondition::ResourcePathEndsWith(".apng".to_string()),
+                        RuleCondition::ResourcePathEndsWith(".avif".to_string()),
+                        RuleCondition::ResourcePathEndsWith(".gif".to_string()),
+                        RuleCondition::ResourcePathEndsWith(".ico".to_string()),
+                        RuleCondition::ResourcePathEndsWith(".jpg".to_string()),
+                        RuleCondition::ResourcePathEndsWith(".jpeg".to_string()),
+                        RuleCondition::ResourcePathEndsWith(".png".to_string()),
+                        RuleCondition::ResourcePathEndsWith(".svg".to_string()),
+                        RuleCondition::ResourcePathEndsWith(".webp".to_string()),
+                        RuleCondition::ResourcePathEndsWith(".woff2".to_string()),
+                    ]),
+                ]),
+                vec![ModuleRuleEffect::Ignore],
             ));
         }
     }

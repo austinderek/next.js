@@ -21,11 +21,20 @@ import type { NextInfoOptions } from '../cli/next-info.js'
 import type { NextDevOptions } from '../cli/next-dev.js'
 import type { NextBuildOptions } from '../cli/next-build.js'
 
+if (process.env.NEXT_RSPACK) {
+  // silent rspack's schema check
+  process.env.RSPACK_CONFIG_VALIDATE = 'loose-silent'
+}
+
 if (
-  semver.lt(process.versions.node, process.env.__NEXT_REQUIRED_NODE_VERSION!)
+  !semver.satisfies(
+    process.versions.node,
+    process.env.__NEXT_REQUIRED_NODE_VERSION_RANGE!,
+    { includePrerelease: true }
+  )
 ) {
   console.error(
-    `You are using Node.js ${process.versions.node}. For Next.js, Node.js version >= v${process.env.__NEXT_REQUIRED_NODE_VERSION} is required.`
+    `You are using Node.js ${process.versions.node}. For Next.js, Node.js version "${process.env.__NEXT_REQUIRED_NODE_VERSION_RANGE}" is required.`
   )
   process.exit(1)
 }
@@ -115,18 +124,22 @@ program
     )}`
   )
   .option('-d, --debug', 'Enables a more verbose build output.')
-
+  .option(
+    '--debug-prerender',
+    'Enables debug mode for prerendering. Not for production use!'
+  )
   .option('--no-lint', 'Disables linting.')
   .option('--no-mangling', 'Disables mangling.')
   .option('--profile', 'Enables production profiling for React.')
   .option('--experimental-app-only', 'Builds only App Router routes.')
-  .addOption(new Option('--experimental-turbo').hideHelp())
+  .option('--turbo', 'Starts development mode using Turbopack.')
+  .option('--turbopack', 'Starts development mode using Turbopack.')
   .addOption(
     new Option(
       '--experimental-build-mode [mode]',
       'Uses an experimental build mode.'
     )
-      .choices(['compile', 'generate'])
+      .choices(['compile', 'generate', 'generate-env'])
       .default('default')
   )
   .option(
@@ -157,7 +170,8 @@ program
       'If no directory is provided, the current directory will be used.'
     )}`
   )
-  .option('--turbo', 'Starts development mode using Turbopack (beta).')
+  .option('--turbo', 'Starts development mode using Turbopack.')
+  .option('--turbopack', 'Starts development mode using Turbopack.')
   .addOption(
     new Option(
       '-p, --port <port>',
@@ -170,6 +184,11 @@ program
   .option(
     '-H, --hostname <hostname>',
     'Specify a hostname on which to start the application (default: 0.0.0.0).'
+  )
+  .option(
+    '--disable-source-maps',
+    "Don't start the Dev server with `--enable-source-maps`.",
+    false
   )
   .option(
     '--experimental-https',
@@ -403,7 +422,8 @@ const internal = program
   )
 
 internal
-  .command('turbo-trace-server')
+  .command('trace')
+  .alias('turbo-trace-server')
   .argument('[file]', 'Trace file to serve.')
   .action((file: string) => {
     return import('../cli/internal/turbo-trace-server.js').then((mod) =>

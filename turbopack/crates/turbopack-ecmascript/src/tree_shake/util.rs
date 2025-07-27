@@ -1,7 +1,4 @@
-use std::hash::BuildHasherDefault;
-
-use indexmap::IndexSet;
-use rustc_hash::{FxHashSet, FxHasher};
+use rustc_hash::FxHashSet;
 use swc_core::{
     common::SyntaxContext,
     ecma::{
@@ -11,10 +8,10 @@ use swc_core::{
             Function, Id, Ident, ImportSpecifier, MemberExpr, MemberProp, NamedExport, Param, Pat,
             Prop, PropName, VarDeclarator, *,
         },
-        visit::{noop_visit_type, Visit, VisitWith},
+        visit::{Visit, VisitWith, noop_visit_type},
     },
 };
-use turbo_tasks::RcStr;
+use turbo_tasks::FxIndexSet;
 
 use crate::TURBOPACK_HELPER;
 
@@ -195,9 +192,9 @@ impl Visit for IdentUsageCollector<'_> {
 #[derive(Debug, Default)]
 pub(crate) struct Vars {
     /// Variables which are read.
-    pub read: IndexSet<Id, BuildHasherDefault<FxHasher>>,
+    pub read: FxIndexSet<Id>,
     /// Variables which are written.
-    pub write: IndexSet<Id, BuildHasherDefault<FxHasher>>,
+    pub write: FxIndexSet<Id>,
 
     pub found_unresolved: bool,
 }
@@ -362,10 +359,10 @@ impl Visit for TopLevelBindingCollector {
     fn visit_pat(&mut self, node: &Pat) {
         node.visit_children_with(self);
 
-        if self.is_pat_decl {
-            if let Pat::Ident(i) = node {
-                self.add(&i.id)
-            }
+        if self.is_pat_decl
+            && let Pat::Ident(i) = node
+        {
+            self.add(&i.id)
         }
     }
 
@@ -393,88 +390,76 @@ where
     v.bindings
 }
 
-pub fn should_skip_tree_shaking(m: &Program, special_exports: &[RcStr]) -> bool {
-    if let Program::Module(m) = m {
-        for item in m.body.iter() {
-            match item {
-                // Skip turbopack helpers.
-                ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
-                    with, specifiers, ..
-                })) => {
-                    if let Some(with) = with.as_deref().and_then(|v| v.as_import_with()) {
-                        for item in with.values.iter() {
-                            if item.key.sym == *TURBOPACK_HELPER {
-                                // Skip tree shaking if the import is from turbopack-helper
-                                return true;
-                            }
-                        }
-                    }
+pub fn should_skip_tree_shaking(m: &Program) -> bool {
+    let Program::Module(m) = m else {
+        return true;
+    };
 
-                    // TODO(PACK-3150): Tree shaking has a bug related to ModuleExportName::Str
-                    for s in specifiers.iter() {
-                        if let ImportSpecifier::Named(is) = s {
-                            if matches!(is.imported, Some(ModuleExportName::Str(..))) {
-                                return true;
-                            }
-                        }
-                    }
-                }
+    // If there's no export, we will result in module evaluation containing all code, so just we
+    // skip tree shaking.
+    if m.body.iter().all(|item| {
+        matches!(
+            item,
+            ModuleItem::ModuleDecl(ModuleDecl::Import(..)) | ModuleItem::Stmt(..)
+        )
+    }) {
+        return true;
+    }
 
-                // Tree shaking has a bug related to ModuleExportName::Str
-                ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(NamedExport {
-                    src: Some(..),
-                    specifiers,
-                    ..
-                })) => {
-                    for s in specifiers {
-                        if let ExportSpecifier::Named(es) = s {
-                            if matches!(es.orig, ModuleExportName::Str(..))
-                                || matches!(es.exported, Some(ModuleExportName::Str(..)))
-                            {
-                                return true;
-                            }
+    for item in m.body.iter() {
+        match item {
+            // Skip turbopack helpers.
+            ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
+                with, specifiers, ..
+            })) => {
+                if let Some(with) = with.as_deref().and_then(|v| v.as_import_with()) {
+                    for item in with.values.iter() {
+                        if item.key.sym == *TURBOPACK_HELPER {
+                            // Skip tree shaking if the import is from turbopack-helper
+                            return true;
                         }
                     }
                 }
 
-                // Skip special reexports that are recognized by next.js
-                ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl {
-                    decl: Decl::Var(box VarDecl { decls, .. }),
-                    ..
-                })) => {
-                    for decl in decls {
-                        if let Pat::Ident(name) = &decl.name {
-                            if special_exports.iter().any(|s| **s == *name.sym) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-
-                // Skip special reexports that are recognized by next.js
-                ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl {
-                    decl: Decl::Fn(f),
-                    ..
-                })) => {
-                    if special_exports.iter().any(|s| **s == *f.ident.sym) {
+                // TODO(PACK-3150): Tree shaking has a bug related to ModuleExportName::Str
+                for s in specifiers.iter() {
+                    if let ImportSpecifier::Named(is) = s
+                        && matches!(is.imported, Some(ModuleExportName::Str(..)))
+                    {
                         return true;
                     }
                 }
-
-                _ => {}
             }
-        }
 
-        let mut visitor = ShouldSkip::default();
-        m.visit_with(&mut visitor);
-        if visitor.skip {
-            return true;
-        }
-
-        for item in m.body.iter() {
-            if item.is_module_decl() {
-                return false;
+            // Tree shaking has a bug related to ModuleExportName::Str
+            ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(NamedExport {
+                src: Some(..),
+                specifiers,
+                ..
+            })) => {
+                for s in specifiers {
+                    if let ExportSpecifier::Named(es) = s
+                        && (matches!(es.orig, ModuleExportName::Str(..))
+                            || matches!(es.exported, Some(ModuleExportName::Str(..))))
+                    {
+                        return true;
+                    }
+                }
             }
+
+            _ => {}
+        }
+    }
+
+    let mut visitor = ShouldSkip::default();
+    m.visit_with(&mut visitor);
+    if visitor.skip {
+        return true;
+    }
+
+    for item in m.body.iter() {
+        if item.is_module_decl() {
+            return false;
         }
     }
 
@@ -494,19 +479,8 @@ impl Visit for ShouldSkip {
             callee: Callee::Expr(expr),
             ..
         }) = &*n.arg
+            && expr.is_ident_ref_to("__turbopack_wasm_module__")
         {
-            if expr.is_ident_ref_to("__turbopack_wasm_module__") {
-                self.skip = true;
-                return;
-            }
-        }
-
-        n.visit_children_with(self);
-    }
-
-    fn visit_callee(&mut self, n: &Callee) {
-        // TOOD(PACK-3231): Tree shaking work with dynamic imports
-        if matches!(n, Callee::Import(..)) {
             self.skip = true;
             return;
         }
@@ -516,13 +490,6 @@ impl Visit for ShouldSkip {
 
     fn visit_expr(&mut self, n: &Expr) {
         if self.skip {
-            return;
-        }
-
-        // This is needed to pass some tests even if we enable tree shaking only for production
-        // builds.
-        if n.is_ident_ref_to("__turbopack_refresh__") {
-            self.skip = true;
             return;
         }
 

@@ -1,9 +1,9 @@
-use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use turbo_tasks::{RcStr, ReadRef};
+use turbo_rcstr::RcStr;
+use turbo_tasks::{FxIndexMap, ReadRef};
 
-use crate::{route_matcher::Param, ResponseHeaders, StructuredError};
+use crate::{ResponseHeaders, StructuredError, route_matcher::Param};
 
 pub(crate) mod error_page;
 pub mod issue;
@@ -15,7 +15,7 @@ pub mod rendered_source;
 #[turbo_tasks::value(shared)]
 #[serde(rename_all = "camelCase")]
 pub struct RenderData {
-    params: IndexMap<RcStr, Param>,
+    params: FxIndexMap<RcStr, Param>,
     method: RcStr,
     url: RcStr,
     original_url: RcStr,

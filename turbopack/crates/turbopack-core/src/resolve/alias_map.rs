@@ -6,15 +6,16 @@ use std::{
 
 use patricia_tree::PatriciaMap;
 use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
     de::{MapAccess, Visitor},
     ser::SerializeMap,
-    Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_bytes::{ByteBuf, Bytes};
+use turbo_rcstr::RcStr;
 use turbo_tasks::{
-    debug::{internal::PassthroughDebug, ValueDebugFormat, ValueDebugFormatString},
+    NonLocalValue,
+    debug::{ValueDebugFormat, ValueDebugFormatString, internal::PassthroughDebug},
     trace::{TraceRawVcs, TraceRawVcsContext},
-    RcStr,
 };
 
 use super::pattern::Pattern;
@@ -123,11 +124,13 @@ where
     }
 }
 
+unsafe impl<T: NonLocalValue> NonLocalValue for AliasMap<T> {}
+
 impl<T> ValueDebugFormat for AliasMap<T>
 where
     T: ValueDebugFormat,
 {
-    fn value_debug_format(&self, depth: usize) -> ValueDebugFormatString {
+    fn value_debug_format(&self, depth: usize) -> ValueDebugFormatString<'_> {
         if depth == 0 {
             return ValueDebugFormatString::Sync(std::any::type_name::<Self>().to_string());
         }
@@ -143,7 +146,7 @@ where
                         value.value_debug_format(depth.saturating_sub(1)),
                     ),
                     AliasKey::Wildcard { suffix } => (
-                        format!("{}*{}", key, suffix),
+                        format!("{key}*{suffix}"),
                         value.value_debug_format(depth.saturating_sub(1)),
                     ),
                 })
@@ -162,7 +165,7 @@ where
                     }
                 }
             }
-            Ok(format!("{:#?}", values_string))
+            Ok(format!("{values_string:#?}"))
         }))
     }
 }
@@ -177,7 +180,7 @@ where
                 let key = String::from_utf8(key).expect("invalid UTF-8 key in AliasMap");
                 map.iter().map(move |(alias_key, value)| match alias_key {
                     AliasKey::Exact => (key.clone(), value),
-                    AliasKey::Wildcard { suffix } => (format!("{}*{}", key, suffix), value),
+                    AliasKey::Wildcard { suffix } => (format!("{key}*{suffix}"), value),
                 })
             }))
             .finish()
@@ -200,10 +203,7 @@ impl<T> AliasMap<T> {
         T: Debug,
     {
         if matches!(request, Pattern::Alternatives(_)) {
-            panic!(
-                "AliasMap::lookup must not be called on alternatives, received {:?}",
-                request
-            );
+            panic!("AliasMap::lookup must not be called on alternatives, received {request:?}");
         }
 
         // Invariant: prefixes should be sorted by increasing length (base lengths),
@@ -407,7 +407,7 @@ struct AliasMapIterItem<'a, T> {
     iterator: std::collections::btree_map::Iter<'a, AliasKey, T>,
 }
 
-impl<'a, T> AliasMapIter<'a, T> {
+impl<T> AliasMapIter<'_, T> {
     fn advance_iter(&mut self) -> bool {
         let Some((prefix, map)) = self.iter.next() else {
             return false;
@@ -574,7 +574,7 @@ impl AliasPattern {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, TraceRawVcs)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, TraceRawVcs, NonLocalValue)]
 enum AliasKey {
     Exact,
     Wildcard { suffix: RcStr },
@@ -615,7 +615,7 @@ where
     }
 
     /// Returns the wrapped value.
-    pub fn as_self(&'a self) -> &T::Output<'a> {
+    pub fn as_self(&self) -> &T::Output<'a> {
         match self {
             Self::Exact(v) => v,
             Self::Replaced(v) => v,
@@ -747,7 +747,10 @@ mod test {
     }
 
     impl<'a> AliasTemplate for &'a str {
-        type Output<'b> = Pattern where Self: 'b;
+        type Output<'b>
+            = Pattern
+        where
+            Self: 'b;
 
         fn replace(&self, capture: &Pattern) -> Self::Output<'a> {
             capture.spread_into_star(self)

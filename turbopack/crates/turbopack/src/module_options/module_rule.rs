@@ -1,17 +1,18 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use turbo_tasks::{trace::TraceRawVcs, Vc};
+use turbo_tasks::{NonLocalValue, ResolvedVc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
-    reference_type::ReferenceType, source::Source, source_transform::SourceTransforms,
+    environment::Environment, reference_type::ReferenceType, source::Source,
+    source_transform::SourceTransforms,
 };
 use turbopack_css::CssModuleAssetType;
 use turbopack_ecmascript::{EcmascriptInputTransforms, EcmascriptOptions};
 use turbopack_wasm::source::WebAssemblySourceType;
 
-use super::{match_mode::MatchMode, CustomModuleType, RuleCondition};
+use super::{CustomModuleType, RuleCondition, match_mode::MatchMode};
 
-#[derive(Debug, Clone, Serialize, Deserialize, TraceRawVcs, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, TraceRawVcs, PartialEq, Eq, NonLocalValue)]
 pub struct ModuleRule {
     condition: RuleCondition,
     effects: Vec<ModuleRuleEffect>,
@@ -52,7 +53,7 @@ impl ModuleRule {
 
     pub async fn matches(
         &self,
-        source: Vc<Box<dyn Source>>,
+        source: ResolvedVc<Box<dyn Source>>,
         path: &FileSystemPath,
         reference_type: &ReferenceType,
     ) -> Result<bool> {
@@ -69,45 +70,46 @@ pub enum ModuleRuleEffect {
     /// transforms. First argument will prepend the existing transforms, and
     /// the second argument will append the new transforms.
     ExtendEcmascriptTransforms {
-        prepend: Vc<EcmascriptInputTransforms>,
-        append: Vc<EcmascriptInputTransforms>,
+        prepend: ResolvedVc<EcmascriptInputTransforms>,
+        append: ResolvedVc<EcmascriptInputTransforms>,
     },
-    SourceTransforms(Vc<SourceTransforms>),
+    SourceTransforms(ResolvedVc<SourceTransforms>),
+    Ignore,
 }
 
-#[turbo_tasks::value(serialization = "auto_for_input", shared)]
-#[derive(Hash, Debug, Copy, Clone)]
+#[turbo_tasks::value(shared)]
+#[derive(Hash, Debug, Clone)]
 pub enum ModuleType {
     Ecmascript {
-        transforms: Vc<EcmascriptInputTransforms>,
+        transforms: ResolvedVc<EcmascriptInputTransforms>,
         #[turbo_tasks(trace_ignore)]
-        options: Vc<EcmascriptOptions>,
+        options: ResolvedVc<EcmascriptOptions>,
     },
     Typescript {
-        transforms: Vc<EcmascriptInputTransforms>,
+        transforms: ResolvedVc<EcmascriptInputTransforms>,
         // parse JSX syntax.
         tsx: bool,
         // follow references to imported types.
         analyze_types: bool,
         #[turbo_tasks(trace_ignore)]
-        options: Vc<EcmascriptOptions>,
+        options: ResolvedVc<EcmascriptOptions>,
     },
     TypescriptDeclaration {
-        transforms: Vc<EcmascriptInputTransforms>,
+        transforms: ResolvedVc<EcmascriptInputTransforms>,
         #[turbo_tasks(trace_ignore)]
-        options: Vc<EcmascriptOptions>,
+        options: ResolvedVc<EcmascriptOptions>,
     },
     Json,
     Raw,
-    CssGlobal,
     CssModule,
     Css {
         ty: CssModuleAssetType,
-        use_swc_css: bool,
+        environment: Option<ResolvedVc<Environment>>,
     },
-    Static,
+    StaticUrlJs,
+    StaticUrlCss,
     WebAssembly {
         source_ty: WebAssemblySourceType,
     },
-    Custom(Vc<Box<dyn CustomModuleType>>),
+    Custom(ResolvedVc<Box<dyn CustomModuleType>>),
 }

@@ -12,7 +12,7 @@ import type { TypeCheckResult } from './typescript/runTypeCheck'
 import { writeAppTypeDeclarations } from './typescript/writeAppTypeDeclarations'
 import { writeConfigurationDefaults } from './typescript/writeConfigurationDefaults'
 import { installDependencies } from './install-dependencies'
-import { isCI } from '../telemetry/ci-info'
+import { isCI } from '../server/ci-info'
 import { missingDepsError } from './typescript/missingDependencyError'
 
 const requiredPackages = [
@@ -87,7 +87,7 @@ export async function verifyTypeScriptSetup({
           bold(
             'If you are not trying to use TypeScript, please remove the ' +
               cyan('tsconfig.json') +
-              ' file from your package root (and any TypeScript files in your pages directory).'
+              ' file from your package root (and any TypeScript files in your app and pages directories).'
           ) +
           '\n'
       )
@@ -136,7 +136,8 @@ export async function verifyTypeScriptSetup({
 
     let result
     if (typeCheckPreflight) {
-      const { runTypeCheck } = require('./typescript/runTypeCheck')
+      const { runTypeCheck } =
+        require('./typescript/runTypeCheck') as typeof import('./typescript/runTypeCheck')
 
       // Verify the project passes type-checking before we go to webpack phase:
       result = await runTypeCheck(
@@ -164,7 +165,7 @@ export async function verifyTypeScriptSetup({
      */
 
     // we are in a worker, print the error message and exit the process
-    if (process.env.JEST_WORKER_ID) {
+    if (process.env.IS_NEXT_WORKER) {
       if (err instanceof Error) {
         console.error(err.message)
       } else {

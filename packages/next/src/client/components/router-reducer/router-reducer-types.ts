@@ -14,18 +14,14 @@ export const ACTION_HMR_REFRESH = 'hmr-refresh'
 export const ACTION_SERVER_ACTION = 'server-action'
 
 export type RouterChangeByServerResponse = ({
+  navigatedAt,
   previousTree,
   serverResponse,
 }: {
+  navigatedAt: number
   previousTree: FlightRouterState
   serverResponse: FetchServerResponseResult
 }) => void
-
-export type RouterNavigate = (
-  href: string,
-  navigateType: 'push' | 'replace',
-  shouldScroll: boolean
-) => void
 
 export interface Mutable {
   mpaNavigation?: boolean
@@ -112,6 +108,7 @@ export interface NavigateAction {
   locationSearch: Location['search']
   navigateType: 'push' | 'replace'
   shouldScroll: boolean
+  allowAliasing: boolean
 }
 
 /**
@@ -136,6 +133,7 @@ export interface RestoreAction {
  */
 export interface ServerPatchAction {
   type: typeof ACTION_SERVER_PATCH
+  navigatedAt: number
   serverResponse: FetchServerResponseResult
   previousTree: FlightRouterState
 }
@@ -204,6 +202,7 @@ export type PrefetchCacheEntry = {
   data: Promise<FetchServerResponseResult>
   kind: PrefetchKind
   prefetchTime: number
+  staleTime: number
   lastUsedTime: number | null
   key: string
   status: PrefetchCacheEntryStatus
@@ -221,11 +220,6 @@ export enum PrefetchCacheEntryStatus {
  * Handles keeping the state of app-router.
  */
 export type AppRouterState = {
-  /**
-   * The buildId is used to do a mpaNavigation when the server returns a different buildId.
-   * It is used to avoid issues where an older version of the app is loaded in the browser while the server has a new version.
-   */
-  buildId: string
   /**
    * The router state, this is written into the history state in app-router using replaceState/pushState.
    * - Has to be serializable as it is written into the history state.

@@ -21,7 +21,7 @@ window.next = {
 // for the page loader
 declare let __turbopack_load__: any
 
-const devClient = initHMR('turbopack')
+const devClient = initHMR()
 initialize({
   devClient,
 })
@@ -31,7 +31,9 @@ initialize({
       page: string,
       chunksData: any
     ) => {
-      const chunkPromises = chunksData.map(__turbopack_load__)
+      const chunkPromises = chunksData.map((c: unknown) =>
+        __turbopack_load__(c)
+      )
 
       Promise.all(chunkPromises).catch((err) =>
         console.error('failed to load chunks for page ' + page, err)

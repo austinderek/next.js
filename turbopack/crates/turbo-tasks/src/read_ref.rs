@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 use turbo_tasks_hash::DeterministicHash;
 
 use crate::{
+    SharedReference, Vc, VcRead, VcValueType,
     debug::{ValueDebugFormat, ValueDebugFormatString},
     trace::{TraceRawVcs, TraceRawVcsContext},
     triomphe_utils::unchecked_sidecast_triomphe_arc,
     vc::VcCellMode,
-    SharedReference, Vc, VcRead, VcValueType,
 };
 
 type VcReadTarget<T> = <<T as VcValueType>::Read as VcRead<T>>::Target;
@@ -77,7 +77,7 @@ where
     T: VcValueType,
     VcReadTarget<T>: ValueDebugFormat + 'static,
 {
-    fn value_debug_format(&self, depth: usize) -> ValueDebugFormatString {
+    fn value_debug_format(&self, depth: usize) -> ValueDebugFormatString<'_> {
         let value = &**self;
         value.value_debug_format(depth)
     }
@@ -234,6 +234,10 @@ impl<T> ReadRef<T> {
     pub fn ptr_eq(&self, other: &ReadRef<T>) -> bool {
         triomphe::Arc::ptr_eq(&self.0, &other.0)
     }
+
+    pub fn ptr(&self) -> *const T {
+        &*self.0 as *const T
+    }
 }
 
 impl<T> ReadRef<T>
@@ -261,11 +265,26 @@ where
 impl<T> ReadRef<T>
 where
     T: VcValueType,
+{
+    /// Returns the inner value, if this [`ReadRef`] has exactly one strong reference.
+    ///
+    /// Otherwise, an [`Err`] is returned with the same [`ReadRef`] that was passed in.
+    pub fn try_unwrap(this: Self) -> Result<VcReadTarget<T>, Self> {
+        match triomphe::Arc::try_unwrap(this.0) {
+            Ok(value) => Ok(T::Read::value_to_target(value)),
+            Err(arc) => Err(Self(arc)),
+        }
+    }
+}
+
+impl<T> ReadRef<T>
+where
+    T: VcValueType,
     VcReadTarget<T>: Clone,
 {
-    /// This will clone the contained value instead of cloning the ReadRef.
-    /// This clone is more expensive, but allows to get an mutable owned value.
-    pub fn clone_value(&self) -> VcReadTarget<T> {
-        (**self).clone()
+    /// This is return a owned version of the value. It potentially clones the value.
+    /// The clone might be expensive. Prefer Deref to get a reference to the value.
+    pub fn into_owned(this: Self) -> VcReadTarget<T> {
+        Self::try_unwrap(this).unwrap_or_else(|this| (*this).clone())
     }
 }
