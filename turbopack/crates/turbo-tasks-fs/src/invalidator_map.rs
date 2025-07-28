@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     path::PathBuf,
     sync::{LockResult, Mutex, MutexGuard},
 };
@@ -16,18 +17,18 @@ pub enum WriteContent {
     Link(ReadRef<LinkContent>),
 }
 
-type InnerMap = FxHashMap<PathBuf, FxHashMap<Invalidator, Option<WriteContent>>>;
+pub type LockedInvalidatorMap = BTreeMap<PathBuf, FxHashMap<Invalidator, Option<WriteContent>>>;
 
 pub struct InvalidatorMap {
     queue: ConcurrentQueue<(PathBuf, Invalidator, Option<WriteContent>)>,
-    map: Mutex<InnerMap>,
+    map: Mutex<LockedInvalidatorMap>,
 }
 
 impl Default for InvalidatorMap {
     fn default() -> Self {
         Self {
             queue: ConcurrentQueue::unbounded(),
-            map: Default::default(),
+            map: Mutex::<LockedInvalidatorMap>::default(),
         }
     }
 }
@@ -37,7 +38,7 @@ impl InvalidatorMap {
         Self::default()
     }
 
-    pub fn lock(&self) -> LockResult<MutexGuard<'_, InnerMap>> {
+    pub fn lock(&self) -> LockResult<MutexGuard<'_, LockedInvalidatorMap>> {
         let mut guard = self.map.lock()?;
         while let Ok((key, value, write_content)) = self.queue.pop() {
             guard.entry(key).or_default().insert(value, write_content);
@@ -69,7 +70,11 @@ impl Serialize for InvalidatorMap {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_newtype_struct("InvalidatorMap", &*self.lock().unwrap())
+        // TODO: This stores `PathBuf`s, which are machine-specific, but turbo_tasks doesn't
+        // actually care about these, so we should skip serializing them entirely. Really we just
+        // need a way to store list of invalidator task ids across restarts.
+        let inner: &LockedInvalidatorMap = &self.lock().unwrap();
+        serializer.serialize_newtype_struct("InvalidatorMap", inner)
     }
 }
 
