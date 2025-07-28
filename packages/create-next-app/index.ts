@@ -50,6 +50,8 @@ const program = new Command(packageJson.name)
   .option('--js, --javascript', 'Initialize as a JavaScript project.')
   .option('--tailwind', 'Initialize with Tailwind CSS config. (default)')
   .option('--eslint', 'Initialize with ESLint config.')
+  .option('--biome', 'Initialize with Biome config.')
+  .option('--no-linter', 'Skip linter configuration.')
   .option('--app', 'Initialize as an App Router project.')
   .option('--src-dir', "Initialize inside a 'src/' directory.")
   .option('--turbopack', 'Enable Turbopack by default for development.')
@@ -229,6 +231,7 @@ async function run(): Promise<void> {
     const defaults: typeof preferences = {
       typescript: true,
       eslint: false,
+      linter: 'none',
       tailwind: true,
       app: true,
       srcDir: false,
@@ -277,23 +280,62 @@ async function run(): Promise<void> {
       }
     }
 
-    if (!opts.eslint && !args.includes('--no-eslint') && !opts.api) {
+    // Determine linter choice if not specified via CLI flags
+    if (!opts.eslint && !opts.biome && !opts.noLinter && !opts.api) {
       if (skipPrompt) {
-        opts.eslint = getPrefOrDefault('eslint')
+        const preferredLinter = getPrefOrDefault('linter')
+        opts.eslint = preferredLinter === 'eslint'
+        opts.biome = preferredLinter === 'biome'
+        opts.noLinter = preferredLinter === 'none'
       } else {
-        const styledEslint = blue('ESLint')
-        const { eslint } = await prompts({
+        const { linter } = await prompts({
           onState: onPromptState,
-          type: 'toggle',
-          name: 'eslint',
-          message: `Would you like to use ${styledEslint}?`,
-          initial: getPrefOrDefault('eslint'),
-          active: 'Yes',
-          inactive: 'No',
+          type: 'select',
+          name: 'linter',
+          message: 'Which linter would you like to use?',
+          choices: [
+            {
+              title: 'ESLint',
+              value: 'eslint',
+              description: 'The most popular linter',
+            },
+            {
+              title: 'Biome',
+              value: 'biome',
+              description: 'Fast formatter and linter',
+            },
+            {
+              title: 'None',
+              value: 'none',
+              description: 'Skip linter configuration',
+            },
+          ],
+          initial: 0,
         })
-        opts.eslint = Boolean(eslint)
-        preferences.eslint = Boolean(eslint)
+
+        opts.eslint = linter === 'eslint'
+        opts.biome = linter === 'biome'
+        opts.noLinter = linter === 'none'
+        preferences.linter = linter
+
+        // Keep backwards compatibility with old eslint preference
+        preferences.eslint = linter === 'eslint'
       }
+    } else if (opts.eslint) {
+      opts.biome = false
+      opts.noLinter = false
+      preferences.linter = 'eslint'
+      preferences.eslint = true
+    } else if (opts.biome) {
+      opts.eslint = false
+      opts.noLinter = false
+      preferences.linter = 'biome'
+      preferences.eslint = false
+    } else if (opts.noLinter) {
+      opts.eslint = false
+      opts.biome = false
+      preferences.linter = 'none'
+      preferences.eslint = false
     }
 
     if (!opts.tailwind && !args.includes('--no-tailwind') && !opts.api) {
@@ -426,6 +468,7 @@ async function run(): Promise<void> {
       typescript: opts.typescript,
       tailwind: opts.tailwind,
       eslint: opts.eslint,
+      biome: opts.biome,
       app: opts.app,
       srcDir: opts.srcDir,
       importAlias: opts.importAlias,
@@ -459,6 +502,7 @@ async function run(): Promise<void> {
       packageManager,
       typescript: opts.typescript,
       eslint: opts.eslint,
+      biome: opts.biome,
       tailwind: opts.tailwind,
       app: opts.app,
       srcDir: opts.srcDir,
