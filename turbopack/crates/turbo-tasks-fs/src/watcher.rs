@@ -118,7 +118,12 @@ impl NonRecursiveDiskWatcherState {
         let mut internal = watcher.internal.lock().unwrap();
         for dir_path in self.watching.iter() {
             // TODO: Report diagnostics if this error happens
-            let _ = self.start_watching_dir(&mut internal, &dir_path, root_path);
+            let _ = self.start_watching_dir(
+                &mut internal,
+                &dir_path,
+                root_path,
+                /* watch_parents */ true,
+            );
         }
     }
 
@@ -131,8 +136,28 @@ impl NonRecursiveDiskWatcherState {
     ) -> Result<()> {
         if self.watching.contains(dir_path) {
             let mut internal = watcher.internal.lock().unwrap();
-            // TODO: Also restore any watchers for children of this directory
-            self.start_watching_dir(&mut internal, dir_path, root_path)?;
+
+            // watch the new directory and any of it's parents
+            self.start_watching_dir(
+                &mut internal,
+                dir_path,
+                root_path,
+                /* watch_parents */ true,
+            )?;
+
+            // Also try to restore any watchers for children of this directory
+            for child_path in self
+                .watching
+                .iter()
+                .filter(|p| p.key().starts_with(dir_path))
+            {
+                self.start_watching_dir(
+                    &mut internal,
+                    child_path.key(),
+                    root_path,
+                    /* watch_parents */ false,
+                )?;
+            }
         }
         Ok(())
     }
@@ -148,17 +173,26 @@ impl NonRecursiveDiskWatcherState {
         }
         let mut internal = watcher.internal.lock().unwrap();
         if self.watching.insert(dir_path.to_path_buf()) {
-            self.start_watching_dir(&mut internal, dir_path, root_path)?;
+            self.start_watching_dir(
+                &mut internal,
+                dir_path,
+                root_path,
+                /* watch_parents */ true,
+            )?;
         }
         Ok(())
     }
 
-    /// Private helper, assumes that the path has already been added to `self.watching`.
+    /// Private helper, assumes that `dir_path` has already been added to `self.watching`.
+    ///
+    /// If `watch_parents` is true, this will also start watching and add all parents (up until the
+    /// `root_path`) to `self.watching`.
     fn start_watching_dir(
         &self,
         watcher_internal_guard: &mut MutexGuard<Option<DiskWatcherInternal>>,
         dir_path: &Path,
         root_path: &Path,
+        watch_parents: bool,
     ) -> Result<()> {
         let Some(watcher_internal_guard) = watcher_internal_guard.as_mut() else {
             return Ok(());
@@ -191,7 +225,7 @@ impl NonRecursiveDiskWatcherState {
                             |err| err.into(),
                         ));
                     };
-                    if !self.watching.insert(parent_path.to_path_buf()) {
+                    if !watch_parents || !self.watching.insert(parent_path.to_path_buf()) {
                         break;
                     }
                     path = parent_path;
