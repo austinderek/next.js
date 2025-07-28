@@ -363,13 +363,13 @@ pub enum InfoMessage {
     // All fields are `default` since it is ok for the client to
     // simply omit instead of sending empty arrays.
     Dependencies {
-        #[serde(default)]
+        #[serde(default, rename = "envVariables")]
         env_variables: Vec<RcStr>,
-        #[serde(default)]
+        #[serde(default, rename = "filePaths")]
         file_paths: Vec<RcStr>,
         #[serde(default)]
         directories: Vec<(RcStr, RcStr)>,
-        #[serde(default)]
+        #[serde(default, rename = "buildFilePaths")]
         build_file_paths: Vec<RcStr>,
     },
     EmittedError {
