@@ -5,11 +5,17 @@ description: API Reference for the revalidatePath function.
 
 `revalidatePath` allows you to purge [cached data](/docs/app/guides/caching) on-demand for a specific path.
 
+## Usage
+
+`revalidatePath` can be called in Server Functions and Route Handlers.
+
+`revalidatePath` cannot be called in Client Components or Middleware, as it only works in server environments.
+
 > **Good to know**:
 >
-> - `revalidatePath` only invalidates the cache when the included path is next visited. This means calling `revalidatePath` with a dynamic route segment will not immediately trigger many revalidations at once. The invalidation only happens when the path is next visited.
-> - Currently, `revalidatePath` invalidates all the routes in the [client-side Router Cache](/docs/app/guides/caching#client-side-router-cache) when used in a server action. This behavior is temporary and will be updated in the future to apply only to the specific path.
-> - Using `revalidatePath` invalidates **only the specific path** in the [server-side Route Cache](/docs/app/guides/caching#full-route-cache).
+> - **When revalidation happens**: `revalidatePath` schedules cache invalidation but doesn't immediately clear cached data. The actual revalidation is executed later in the request cycle.
+> - **Navigation behavior**: When called in Server Functions, `revalidatePath` updates the UI (if the user is currently viewing the revalidated path) when the Server Function completes and causes data for all previously visited pages to refresh when navigated to again. This behavior is temporary and will be updated in the future to apply only to the specific path.
+> - **Server-side behavior**: `revalidatePath` ensures that the specified path will be re-rendered with fresh data on subsequent visits, clearing both cached data and pre-rendered pages on the server.
 
 ## Parameters
 
