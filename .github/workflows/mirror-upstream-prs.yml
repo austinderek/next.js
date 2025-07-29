@@ -100,12 +100,8 @@ jobs:
 
           exists=$(gh pr list --state open --head "$pr_branch" --json number --jq '.[0].number')
 
-<<<<<<< HEAD
-            exists=$(gh pr list --state open --head "$pr_branch" --json number --jq -- '.[0].number')
-=======
           if [ -z "$exists" ]; then
             echo "✅ Creating fork PR for upstream PR #$pr_num"
->>>>>>> 21eea24ac0 (update)
 
             # Final verification that the branch exists remotely
             if git ls-remote origin "refs/heads/$pr_branch" | grep -q "$pr_branch"; then
