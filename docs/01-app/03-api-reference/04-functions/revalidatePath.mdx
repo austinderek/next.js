@@ -14,7 +14,7 @@ description: API Reference for the revalidatePath function.
 > **Good to know**:
 >
 > - **Server Functions**: Updates the UI immediately (if viewing the revalidated path). Currently, it also causes all previously visited pages to refresh when navigated to again. This behavior is temporary and will be updated in the future to apply only to the specific path.
-> - **Route Handlers**: Marks the path for revalidation. The revalidation is done on the next visit to the specified path. This means calling `revalidatePath` with a dynamic route segment will not immediately trigger many revalidation at once. The invalidation only happens when the path is next visited.
+> - **Route Handlers**: Marks the path for revalidation. The revalidation is done on the next visit to the specified path. This means calling `revalidatePath` with a dynamic route segment will not immediately trigger many revalidations at once. The invalidation only happens when the path is next visited.
 
 ## Parameters
 
