@@ -4145,9 +4145,9 @@ const getGlobalErrorStyles = async (
   }
   if (ctx.renderOpts.dev) {
     const dir =
-      process.env.NEXT_RUNTIME === 'edge'
-        ? process.env.__NEXT_EDGE_PROJECT_DIR!
-        : ctx.renderOpts.dir || ''
+      (process.env.NEXT_RUNTIME === 'edge'
+        ? process.env.__NEXT_EDGE_PROJECT_DIR
+        : ctx.renderOpts.dir) || ''
 
     const globalErrorModulePath = normalizeConventionFilePath(
       dir,
