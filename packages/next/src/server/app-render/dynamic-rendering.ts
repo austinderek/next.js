@@ -230,6 +230,7 @@ export function trackDynamicDataInDynamicRender(workUnitStore: WorkUnitStore) {
       // A private cache scope is already dynamic by definition.
       return
     case 'prerender':
+    case 'prerender-runtime':
     case 'prerender-legacy':
     case 'prerender-ppr':
     case 'prerender-client':
@@ -519,6 +520,7 @@ export function createHangingInputAbortSignal(
 ): AbortSignal | undefined {
   switch (workUnitStore.type) {
     case 'prerender':
+    case 'prerender-runtime':
       const controller = new AbortController()
 
       if (workUnitStore.cacheSignal) {
@@ -599,6 +601,10 @@ export function useDynamicRouteParams(expression: string) {
         }
         break
       }
+      case 'prerender-runtime':
+        throw new InvariantError(
+          `\`${expression}\` was called during a runtime prerender. Next.js should be preventing ${expression} from being included in server components statically, but did not in this case.`
+        )
       case 'cache':
       case 'private-cache':
         throw new InvariantError(
