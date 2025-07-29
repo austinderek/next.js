@@ -1,0 +1,112 @@
+name: Sync canary + Mirror Upstream PRs
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # every hour
+  workflow_dispatch:
+
+jobs:
+  sync-canary:
+    name: Sync canary Branch from Upstream
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout your fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # leave out persist-credentials to enable auth for pushes
+
+      - name: Set up Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream and sync
+        run: |
+          git remote add upstream https://github.com/vercel/next.js.git
+          git fetch upstream
+          git checkout -B canary upstream/canary
+          git push origin canary --force
+
+  mirror-prs:
+    name: Mirror and Sync PRs
+    needs: sync-canary
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout your fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node and install GitHub CLI
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install gh -y
+
+      - name: Authenticate GitHub CLI
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      - name: Set environment variables
+        run: |
+          echo "REPO_NAME=$(basename $GITHUB_REPOSITORY)" >> $GITHUB_ENV
+          echo "FORK_OWNER=$(echo $GITHUB_REPOSITORY | cut -d'/' -f1)" >> $GITHUB_ENV
+          echo "UPSTREAM_OWNER=vercel" >> $GITHUB_ENV
+
+      - name: Add upstream and fetch PRs
+        run: |
+          git remote add upstream https://github.com/${UPSTREAM_OWNER}/${REPO_NAME}.git
+          git fetch upstream
+
+      - name: Mirror open upstream PRs
+        run: |
+          PRS=$(gh pr list -R ${UPSTREAM_OWNER}/${REPO_NAME} --state open --json number,headRefName --jq '.[] | [.number, .headRefName] | @tsv')
+
+          while IFS=$'\t' read -r pr_num head_ref; do
+            pr_branch="upstream-pr-$pr_num"
+            upstream_ref="refs/pull/$pr_num/head"
+
+            echo "Processing upstream PR #$pr_num..."
+
+            git fetch upstream "$upstream_ref:$pr_branch"
+            git push origin "$pr_branch" --force
+
+            exists=$(gh pr list --state open --head "$pr_branch" --json number --jq '.[0].number')
+
+            if [ -z "$exists" ]; then
+              echo "Creating fork PR for upstream PR #$pr_num"
+              gh pr create \
+                --base canary \
+                --head "$pr_branch" \
+                --title "Mirror of upstream PR #$pr_num" \
+                --body "This PR mirrors [upstream PR #$pr_num](https://github.com/${UPSTREAM_OWNER}/${REPO_NAME}/pull/$pr_num).\n\nAuto-synced from upstream."
+            else
+              echo "Fork PR already exists for #$pr_num"
+            fi
+          done <<< "$PRS"
+
+      - name: Close mirrored fork PRs that are closed upstream
+        run: |
+          fork_prs=$(gh pr list --state open --json number,headRefName,title --jq '.[] | select(.title | test("Mirror of upstream PR #[0-9]+")) | [.number, .headRefName] | @tsv')
+
+          while IFS=$'\t' read -r fork_pr_num head_branch; do
+            if [[ $head_branch =~ upstream-pr-([0-9]+) ]]; then
+              upstream_pr_num=${BASH_REMATCH[1]}
+              upstream_state=$(gh pr view "$upstream_pr_num" -R ${UPSTREAM_OWNER}/${REPO_NAME} --json state --jq .state)
+
+              if [[ "$upstream_state" != "OPEN" ]]; then
+                echo "Closing fork PR #$fork_pr_num (upstream PR #$upstream_pr_num is $upstream_state)"
+                gh pr close "$fork_pr_num" --delete-branch
+              fi
+            fi
+          done <<< "$fork_prs"
