@@ -16,7 +16,7 @@ jobs:
       - name: Checkout your fork
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # leave out persist-credentials to enable auth for pushes
+          fetch-depth: 0
 
       - name: Set up Git
         run: |
@@ -70,12 +70,14 @@ jobs:
 
       - name: Mirror open upstream PRs
         run: |
-          PRS=$(gh pr list -R "${UPSTREAM_OWNER}/${REPO_NAME}" --state open --json number,headRefName --jq ".[] | @base64")
+          PRS=$(gh pr list -R "${UPSTREAM_OWNER}/${REPO_NAME}" --state open --json number,headRefName,title,body --jq ".[] | @base64")
 
           for line in $PRS; do
             pr_info=$(echo "$line" | base64 --decode)
             pr_num=$(echo "$pr_info" | jq -r '.number')
             pr_branch=$(echo "$pr_info" | jq -r '.headRefName')
+            pr_title=$(echo "$pr_info" | jq -r '.title')
+            pr_body=$(echo "$pr_info" | jq -r '.body // ""')
           upstream_ref="refs/pull/$pr_num/head"
 
           echo "🔄 Processing upstream PR #$pr_num from branch '$pr_branch'..."
@@ -106,19 +108,19 @@ jobs:
             # Final verification that the branch exists remotely
             if git ls-remote origin "refs/heads/$pr_branch" | grep -q "$pr_branch"; then
 
-              # Confirm that the branch has actual differences
-              if ! git diff --quiet origin/canary origin/$pr_branch; then
-                gh pr create \
-                  -R "$GITHUB_REPOSITORY" \
-                  --base canary \
-                  --head "$pr_branch" \
-                  --title "Mirror of upstream PR #$pr_num" \
-                  --body "This PR mirrors [upstream PR #$pr_num](https://github.com/${UPSTREAM_OWNER}/${REPO_NAME}/pull/$pr_num).\n\nAuto-synced from upstream." \
-                  || echo "❌ gh pr create failed for PR #$pr_num"
-              else
-                echo "⚠️ Skipping PR creation: No differences between canary and $pr_branch"
-              fi
-
+              # Prepare the body with mirror info appended
+              mirror_footer=$'\n\n---\n🔄 **This is a mirror of [upstream PR #'"$pr_num"'](https://github.com/'"${UPSTREAM_OWNER}"'/'"${REPO_NAME}"'/pull/'"$pr_num"')**'
+              
+              # Combine original body with mirror footer
+              full_body="$pr_body$mirror_footer"
+              
+              gh pr create \
+                -R "$GITHUB_REPOSITORY" \
+                --base canary \
+                --head "$pr_branch" \
+                --title "$pr_title" \
+                --body "$full_body" \
+                || echo "❌ gh pr create failed for PR #$pr_num"
             else
               echo "❌ Remote branch $pr_branch not found on origin — skipping PR creation"
             fi
