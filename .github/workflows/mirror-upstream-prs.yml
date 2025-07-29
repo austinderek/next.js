@@ -78,11 +78,11 @@ jobs:
             pr_branch=$(echo "$pr_info" | jq -r '.headRefName')
           upstream_ref="refs/pull/$pr_num/head"
 
-          echo "🔄 Processing upstream PR #$pr_num from branch '$pr_head'..."
+          echo "🔄 Processing upstream PR #$pr_num from branch '$pr_branch'..."
 
           # Fetch the upstream PR into a local branch
           git fetch upstream "$upstream_ref:$pr_branch" || {
-            echo "❌ Failed to fetch upstream PR #$pr_num ($pr_head)"
+            echo "❌ Failed to fetch upstream PR #$pr_num ($pr_branch)"
             continue
           }
 
@@ -109,6 +109,7 @@ jobs:
               # Confirm that the branch has actual differences
               if ! git diff --quiet origin/canary origin/$pr_branch; then
                 gh pr create \
+                  -R "$GITHUB_REPOSITORY" \
                   --base canary \
                   --head "$pr_branch" \
                   --title "Mirror of upstream PR #$pr_num" \
