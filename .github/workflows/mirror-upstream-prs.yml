@@ -97,16 +97,28 @@ jobs:
                   continue
                 fi
 
-                # Check if a forked PR already exists
-                exists=$(gh pr list --state open --head "$pr_branch" --json number --jq '.[0].number')
-
                 if [ -z "$exists" ]; then
                   echo "✅ Creating fork PR for upstream PR #$pr_num"
-                  gh pr create \
-                    --base canary \
-                    --head "$pr_branch" \
-                    --title "Mirror of upstream PR #$pr_num" \
-                    --body "This PR mirrors [upstream PR #$pr_num](https://github.com/${UPSTREAM_OWNER}/${REPO_NAME}/pull/$pr_num).\n\nAuto-synced from upstream."
+
+                  # Final verification that the branch exists remotely
+                  if git ls-remote origin "refs/heads/$pr_branch" | grep -q "$pr_branch"; then
+
+                    # Confirm that the branch has actual differences
+                    if ! git diff --quiet origin/canary origin/$pr_branch; then
+                      gh pr create \
+                        --base canary \
+                        --head "$pr_branch" \
+                        --title "Mirror of upstream PR #$pr_num" \
+                        --body "This PR mirrors [upstream PR #$pr_num](https://github.com/${UPSTREAM_OWNER}/${REPO_NAME}/pull/$pr_num).\n\nAuto-synced from upstream." \
+                        || echo "❌ gh pr create failed for PR #$pr_num"
+                    else
+                      echo "⚠️ Skipping PR creation: No differences between canary and $pr_branch"
+                    fi
+
+                  else
+                    echo "❌ Remote branch $pr_branch not found on origin — skipping PR creation"
+                  fi
+
                 else
                   echo "ℹ️ Fork PR already exists for #$pr_num"
                 fi
