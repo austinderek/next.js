@@ -46,6 +46,12 @@ export interface NextInstanceOpts {
   serverReadyPattern?: RegExp
   patchFileDelay?: number
   startServerTimeout?: number
+  /**
+   * Enable when you expect an error to be thrown during the process (e.g. Build Error).
+   * The `next` instance will not be destroyed and will be available to be accessed. This
+   * is useful when you want to access the CLI output.
+   */
+  expectToThrow?: boolean
 }
 
 /**
@@ -88,6 +94,7 @@ export class NextInstance {
   public dirSuffix: string = ''
   public startServerTimeout: number = 10_000 // 10 seconds
   public serverReadyPattern: RegExp = / ✓ Ready in /
+  public expectToThrow: boolean = false
   patchFileDelay: number = 0
 
   constructor(opts: NextInstanceOpts) {

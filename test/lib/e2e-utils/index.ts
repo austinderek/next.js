@@ -214,6 +214,14 @@ export async function createNext(
     })
   } catch (err) {
     require('console').error('Failed to create next instance', err)
+
+    if (opts.expectToThrow) {
+      require('console').warn(
+        'Test option "expectToThrow" is enabled, returning the existing next instance.'
+      )
+      return nextInstance!
+    }
+
     try {
       await nextInstance?.destroy()
     } catch (_) {}
