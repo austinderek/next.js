@@ -254,6 +254,8 @@ export function hydrate(
                 couldBeIntercepted: initialRSCPayload.i,
                 postponed: initialRSCPayload.s,
                 prerendered: initialRSCPayload.S,
+                routeRegex: initialRSCPayload.r,
+                pagePath: initialRSCPayload.t,
               }),
               instrumentationHooks
             )

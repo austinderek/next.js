@@ -10,7 +10,11 @@ import {
 } from './prefetch-cache-utils'
 import { PrefetchKind, type PrefetchCacheEntry } from './router-reducer-types'
 import { addRefreshMarkerToActiveParallelSegments } from './refetch-inactive-parallel-segments'
-import { getFlightDataPartsFromPath } from '../../flight-data-helpers'
+import {
+  getFlightDataPartsFromPath,
+  getRenderedParams,
+} from '../../flight-data-helpers'
+import type { RouteRegexFlightSafe } from '../../../shared/lib/router/utils/route-regex'
 
 export interface InitialRouterStateParameters {
   navigatedAt: number
@@ -21,6 +25,8 @@ export interface InitialRouterStateParameters {
   couldBeIntercepted: boolean
   postponed: boolean
   prerendered: boolean
+  pagePath: string
+  routeRegex: RouteRegexFlightSafe
 }
 
 export function createInitialRouterState({
@@ -32,12 +38,39 @@ export function createInitialRouterState({
   couldBeIntercepted,
   postponed,
   prerendered,
+  pagePath,
+  routeRegex,
 }: InitialRouterStateParameters) {
   // When initialized on the server, the canonical URL is provided as an array of parts.
   // This is to ensure that when the RSC payload streamed to the client, crawlers don't interpret it
   // as a URL that should be crawled.
   const initialCanonicalUrl = initialCanonicalUrlParts.join('/')
-  const normalizedFlightData = getFlightDataPartsFromPath(initialFlightData[0])
+
+  // TODO: Eventually we want to always read the rendered params from the URL
+  // and/or the x-rewritten-path header, so that we can omit them from the
+  // response body. This lets reuse cached responses if params aren't referenced
+  // anywhere in the actual page data, e.g. if they're only accessed by client
+  // components. However, during the initial render, there's no way to access
+  // the headers. For a partially dynamic page, this is OK, because there's
+  // going to be a dynamic server render regardless, so we can send the URL
+  // in the resume body. For a completely static page, though, there's no
+  // dynamic server render, so that won't work.
+  //
+  // Instead, we'll perform a HEAD request and read the rewritten URL from
+  // that response.
+  const renderedPathname = new URL(initialCanonicalUrl, 'http://localhost')
+    .pathname
+  const renderedParams = getRenderedParams(renderedPathname, routeRegex)
+
+  const normalizedFlightData = getFlightDataPartsFromPath(
+    initialFlightData[0],
+    // TODO: If the params cannot be parsed during page load, this suggests a
+    // malformed response. Rather than silently continue, we should consider
+    // erroring instead. Tricky to know what to do to recover, since this is the
+    // initial render; a hard refresh would likely result in the same error.
+    renderedParams ?? {},
+    pagePath
+  )
   const {
     tree: initialTree,
     seedData: initialSeedData,

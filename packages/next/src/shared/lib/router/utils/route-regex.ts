@@ -18,6 +18,13 @@ export interface RouteRegex {
   re: RegExp
 }
 
+// Same as RouteRegex, but the regex is split into parts so it can be sent to
+// the client and re-assembled.
+export interface RouteRegexFlightSafe {
+  groups: { [groupName: string]: Group }
+  reParts: [string, string]
+}
+
 type GetNamedRouteRegexOptions = {
   /**
    * Whether to prefix the route keys with the NEXT_INTERCEPTION_MARKER_PREFIX
@@ -156,6 +163,15 @@ export function getRouteRegex(
   return {
     re: new RegExp(`^${re}$`),
     groups: groups,
+  }
+}
+
+export function toFlightSafeRouteRegex(
+  routeRegex: RouteRegex
+): RouteRegexFlightSafe {
+  return {
+    groups: routeRegex.groups,
+    reParts: [routeRegex.re.source, routeRegex.re.flags],
   }
 }
 

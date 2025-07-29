@@ -22,6 +22,7 @@ import type { NextRequestHint } from '../web/adapter'
 import type { BaseNextRequest } from '../base-http'
 import type { IncomingMessage } from 'http'
 import type { RenderResumeDataCache } from '../resume-data-cache/resume-data-cache'
+import type { RouteRegexFlightSafe } from '../../shared/lib/router/utils/route-regex'
 
 export type DynamicParamTypes =
   | 'catchall'
@@ -302,8 +303,15 @@ export type PreloadCallbacks = (() => void)[]
 export type InitialRSCPayload = {
   /** buildId */
   b: string
+  /** routeRegex*/
+  r: RouteRegexFlightSafe
+  /** pagePath */
+  t: string
   /** assetPrefix */
   p: string
+  // TODO: This isn't really the "canonical" URL (which we usually use to refer
+  // to the URL shown in the browser), it's the URL used to render the page,
+  // which may have been rewritten on the server.
   /** initialCanonicalUrlParts */
   c: string[]
   /** couldBeIntercepted */
@@ -324,6 +332,15 @@ export type InitialRSCPayload = {
 export type NavigationFlightResponse = {
   /** buildId */
   b: string
+  /** routeRegex */
+  r: RouteRegexFlightSafe
+  // TODO: This isn't really the "canonical" URL (which we usually use to refer
+  // to the URL shown in the browser), it's the URL used to render the page,
+  // which may have been rewritten on the server.
+  /** canonicalUrlParts */
+  c: string[]
+  /** pagePath */
+  t: string
   /** flightData */
   f: FlightData
   /** prerendered */
@@ -336,6 +353,15 @@ export type ActionFlightResponse = {
   a: ActionResult
   /** buildId */
   b: string
+  /** routeRegex */
+  r: RouteRegexFlightSafe
+  // TODO: This isn't really the "canonical" URL (which we usually use to refer
+  // to the URL shown in the browser), it's the URL used to render the page,
+  // which may have been rewritten on the server.
+  /** canonicalUrlParts */
+  c: string[]
+  /** pagePath */
+  t: string
   /** flightData */
   f: FlightData
 }

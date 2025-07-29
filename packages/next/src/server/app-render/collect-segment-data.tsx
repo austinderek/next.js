@@ -29,11 +29,14 @@ import {
 } from '../../shared/lib/segment-cache/segment-value-encoding'
 import { getDigestForWellKnownError } from './create-error-handler'
 import type { FallbackRouteParams } from '../request/fallback-params'
+import type { RouteRegexFlightSafe } from '../../shared/lib/router/utils/route-regex'
 
 // Contains metadata about the route tree. The client must fetch this before
 // it can fetch any actual segment data.
 export type RootTreePrefetch = {
   buildId: string
+  routeRegex: RouteRegexFlightSafe
+  pagePath: string
   tree: TreePrefetch
   head: HeadData
   isHeadPartial: boolean
@@ -201,9 +204,11 @@ async function PrefetchTreeData({
     )
     return null
   }
+  const routeRegex = initialRSCPayload.r
   const flightRouterState: FlightRouterState = flightDataPaths[0][0]
   const seedData: CacheNodeSeedData = flightDataPaths[0][1]
   const head: HeadData = flightDataPaths[0][2]
+  const pagePath = initialRSCPayload.t
 
   // Compute the route metadata tree by traversing the FlightRouterState. As we
   // walk the tree, we will also spawn a task to produce a prefetch response for
@@ -211,6 +216,7 @@ async function PrefetchTreeData({
   const tree = collectSegmentDataImpl(
     flightRouterState,
     buildId,
+    routeRegex,
     seedData,
     fallbackRouteParams,
     clientModules,
@@ -228,6 +234,8 @@ async function PrefetchTreeData({
   // Render the route tree to a special `/_tree` segment.
   const treePrefetch: RootTreePrefetch = {
     buildId,
+    routeRegex,
+    pagePath,
     tree,
     head,
     isHeadPartial,
@@ -239,6 +247,7 @@ async function PrefetchTreeData({
 function collectSegmentDataImpl(
   route: FlightRouterState,
   buildId: string,
+  routeRegex: RouteRegexFlightSafe,
   seedData: CacheNodeSeedData | null,
   fallbackRouteParams: FallbackRouteParams | null,
   clientModules: ManifestNode,
@@ -270,6 +279,7 @@ function collectSegmentDataImpl(
     const childTree = collectSegmentDataImpl(
       childRoute,
       buildId,
+      routeRegex,
       childSeedData,
       fallbackRouteParams,
       clientModules,

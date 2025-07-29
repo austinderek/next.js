@@ -140,6 +140,10 @@ import {
 } from '../client-component-renderer-logger'
 import { createServerModuleMap } from './action-utils'
 import { isNodeNextRequest } from '../base-http/helpers'
+import {
+  getRouteRegex,
+  toFlightSafeRouteRegex,
+} from '../../shared/lib/router/utils/route-regex'
 import { parseRelativeUrl } from '../../shared/lib/router/utils/parse-relative-url'
 import AppRouter from '../../client/components/app-router'
 import type { ServerComponentsHmrCache } from '../response-cache'
@@ -489,6 +493,9 @@ async function generateDynamicRSCPayload(
     ).map((path) => path.slice(1)) // remove the '' (root) segment
   }
 
+  const pagePath = ctx.pagePath
+  const routeRegex = toFlightSafeRouteRegex(getRouteRegex(pagePath))
+
   // If we have an action result, then this is a server action response.
   // We can rely on this because `ActionResult` will always be a promise, even if
   // the result is falsey.
@@ -497,12 +504,18 @@ async function generateDynamicRSCPayload(
       a: options.actionResult,
       f: flightData,
       b: ctx.sharedContext.buildId,
+      r: routeRegex,
+      c: prepareInitialCanonicalUrl(url),
+      t: pagePath,
     }
   }
 
   // Otherwise, it's a regular RSC response.
   return {
     b: ctx.sharedContext.buildId,
+    r: routeRegex,
+    c: prepareInitialCanonicalUrl(url),
+    t: pagePath,
     f: flightData,
     S: workStore.isStaticGeneration,
   }
@@ -852,10 +865,14 @@ async function getRSCPayload(
     workStore.isStaticGeneration &&
     ctx.renderOpts.experimental.isRoutePPREnabled === true
 
+  const pagePath = ctx.pagePath
+
   return {
     // See the comment above the `Preloads` component (below) for why this is part of the payload
     P: <Preloads preloadCallbacks={preloadCallbacks} />,
     b: ctx.sharedContext.buildId,
+    r: toFlightSafeRouteRegex(getRouteRegex(pagePath)),
+    t: pagePath,
     p: ctx.assetPrefix,
     c: prepareInitialCanonicalUrl(url),
     i: !!couldBeIntercepted,
@@ -976,8 +993,12 @@ async function getErrorRSCPayload(
     workStore.isStaticGeneration &&
     ctx.renderOpts.experimental.isRoutePPREnabled === true
 
+  const pagePath = ctx.pagePath
+
   return {
     b: ctx.sharedContext.buildId,
+    r: toFlightSafeRouteRegex(getRouteRegex(pagePath)),
+    t: pagePath,
     p: ctx.assetPrefix,
     c: prepareInitialCanonicalUrl(url),
     m: undefined,
@@ -1044,6 +1065,8 @@ function App<T>({
     couldBeIntercepted: response.i,
     postponed: response.s,
     prerendered: response.S,
+    pagePath: response.t,
+    routeRegex: response.r,
   })
 
   const actionQueue = createMutableActionQueue(initialState, null)
@@ -1110,6 +1133,8 @@ function ErrorApp<T>({
     couldBeIntercepted: response.i,
     postponed: response.s,
     prerendered: response.S,
+    pagePath: response.t,
+    routeRegex: response.r,
   })
 
   const actionQueue = createMutableActionQueue(initialState, null)

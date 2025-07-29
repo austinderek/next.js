@@ -25,6 +25,8 @@ import { callServer } from '../../app-call-server'
 import { findSourceMapURL } from '../../app-find-source-map-url'
 import { PrefetchKind } from './router-reducer-types'
 import {
+  getRenderedParams,
+  getRenderedPathname,
   normalizeFlightData,
   prepareFlightRouterStateForRequest,
   type NormalizedFlightData,
@@ -235,8 +237,27 @@ export async function fetchServerResponse(
       return doMpaNavigation(res.url)
     }
 
+    let renderedPathname
+    if (process.env.__NEXT_CLIENT_SEGMENT_CACHE) {
+      // Read the URL from the response object.
+      renderedPathname = getRenderedPathname(res)
+    } else {
+      // Before Segment Cache is enabled, we should not rely on the new
+      // rewrite headers (x-rewritten-path, x-rewritten-query) because that
+      // is a breaking change. Read the URL from the response body.
+      const renderedUrlParts = response.c
+      renderedPathname = new URL(renderedUrlParts.join('/'), 'http://localhost')
+        .pathname
+    }
+    const renderedParams = getRenderedParams(renderedPathname, response.r)
+    if (renderedParams === null) {
+      // Params could not be parsed. This is a malformed response. Fall back
+      // to an MPA navigation.
+      return doMpaNavigation(res.url)
+    }
+
     return {
-      flightData: normalizeFlightData(response.f),
+      flightData: normalizeFlightData(response.f, renderedParams, response.t),
       canonicalUrl: canonicalUrl,
       couldBeIntercepted: interception,
       prerendered: response.S,

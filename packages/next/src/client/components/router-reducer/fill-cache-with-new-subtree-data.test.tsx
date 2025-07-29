@@ -13,6 +13,7 @@ const getFlightData = (): NormalizedFlightData[] => {
       head: null,
       isHeadPartial: false,
       isRootRender: false,
+      dynamicParams: null,
     },
   ]
 }

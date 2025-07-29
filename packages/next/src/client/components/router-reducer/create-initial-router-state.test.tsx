@@ -3,6 +3,7 @@ import type { FlightRouterState } from '../../../server/app-render/types'
 import type { CacheNode } from '../../../shared/lib/app-router-context.shared-runtime'
 import { createInitialRouterState } from './create-initial-router-state'
 import { PrefetchCacheEntryStatus, PrefetchKind } from './router-reducer-types'
+import type { RouteRegexFlightSafe } from '../../../shared/lib/router/utils/route-regex'
 
 const getInitialRouterStateTree = (): FlightRouterState => [
   '',
@@ -25,6 +26,11 @@ describe('createInitialRouterState', () => {
   it('should return the correct initial router state', () => {
     const initialTree = getInitialRouterStateTree()
     const initialCanonicalUrl = '/linking'
+    const pagePath = '/linking'
+    const routeRegex: RouteRegexFlightSafe = {
+      groups: {},
+      reParts: ['^/linking$', ''],
+    } as any
     const children = (
       <html>
         <head></head>
@@ -42,6 +48,8 @@ describe('createInitialRouterState', () => {
       couldBeIntercepted: false,
       postponed: false,
       prerendered: false,
+      pagePath,
+      routeRegex,
     })
 
     const state2 = createInitialRouterState({
@@ -53,6 +61,8 @@ describe('createInitialRouterState', () => {
       couldBeIntercepted: false,
       postponed: false,
       prerendered: false,
+      pagePath,
+      routeRegex,
     })
 
     const expectedCache: CacheNode = {

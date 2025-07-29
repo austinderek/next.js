@@ -9,6 +9,7 @@ import type {
 } from '../../../shared/lib/app-router-context.shared-runtime'
 import type {
   CacheNodeSeedData,
+  DynamicParamTypesShort,
   Segment as FlightRouterStateSegment,
 } from '../../../server/app-render/types'
 import { HasLoadingBoundary } from '../../../server/app-render/types'
@@ -42,7 +43,11 @@ import type {
   NormalizedSearch,
   RouteCacheKey,
 } from './cache-key'
-import { getRenderedSearch } from './cache-key'
+import {
+  getRenderedPathname,
+  getRenderedSearch,
+  getRenderedParams,
+} from '../../flight-data-helpers'
 import { createTupleMap, type TupleMap, type Prefix } from './tuple-map'
 import { createLRU } from './lru'
 import {
@@ -64,6 +69,9 @@ import {
   doesExportedHtmlMatchBuildId,
 } from '../../../shared/lib/segment-cache/output-export-prefetch-encoding'
 import { FetchStrategy } from '../segment-cache'
+import type { DynamicParam } from '../../../server/app-render/app-render'
+import { getDynamicParam } from '../../../shared/lib/router/utils/get-dynamic-param'
+import type { Params } from '../../../server/request/params'
 
 // A note on async/await when working in the prefetch cache:
 //
@@ -132,6 +140,7 @@ type PendingRouteCacheEntry = RouteCacheEntryShared & {
   status: EntryStatus.Empty | EntryStatus.Pending
   blockedTasks: Set<PrefetchTask> | null
   canonicalUrl: null
+  renderedParams: null
   renderedSearch: null
   tree: null
   head: HeadData | null
@@ -143,6 +152,7 @@ type RejectedRouteCacheEntry = RouteCacheEntryShared & {
   status: EntryStatus.Rejected
   blockedTasks: Set<PrefetchTask> | null
   canonicalUrl: null
+  renderedParams: null
   renderedSearch: null
   tree: null
   head: null
@@ -154,6 +164,7 @@ export type FulfilledRouteCacheEntry = RouteCacheEntryShared & {
   status: EntryStatus.Fulfilled
   blockedTasks: null
   canonicalUrl: string
+  renderedParams: Map<string, DynamicParam> | null
   renderedSearch: NormalizedSearch
   tree: RouteTree
   head: HeadData
@@ -553,6 +564,7 @@ export function readOrCreateRouteCacheEntry(
     couldBeIntercepted: true,
     // Similarly, we don't yet know if the route supports PPR.
     isPPREnabled: false,
+    renderedParams: null,
     renderedSearch: null,
 
     // LRU-related fields
@@ -787,6 +799,7 @@ function fulfillRouteCacheEntry(
   staleAt: number,
   couldBeIntercepted: boolean,
   canonicalUrl: string,
+  renderedParams: Map<string, DynamicParam> | null,
   renderedSearch: NormalizedSearch,
   isPPREnabled: boolean
 ): FulfilledRouteCacheEntry {
@@ -798,6 +811,7 @@ function fulfillRouteCacheEntry(
   fulfilledEntry.staleAt = staleAt
   fulfilledEntry.couldBeIntercepted = couldBeIntercepted
   fulfilledEntry.canonicalUrl = canonicalUrl
+  fulfilledEntry.renderedParams = renderedParams
   fulfilledEntry.renderedSearch = renderedSearch
   fulfilledEntry.isPPREnabled = isPPREnabled
   pingBlockedTasks(entry)
@@ -851,13 +865,26 @@ function rejectSegmentCacheEntry(
   }
 }
 
-function convertRootTreePrefetchToRouteTree(rootTree: RootTreePrefetch) {
-  return convertTreePrefetchToRouteTree(rootTree.tree, ROOT_SEGMENT_KEY)
+function convertRootTreePrefetchToRouteTree(
+  rootTree: RootTreePrefetch,
+  rawParams: Params,
+  dynamicParamsResult: Map<string, DynamicParam>
+) {
+  return convertTreePrefetchToRouteTree(
+    rootTree.tree,
+    ROOT_SEGMENT_KEY,
+    rootTree.pagePath,
+    rawParams,
+    dynamicParamsResult
+  )
 }
 
 function convertTreePrefetchToRouteTree(
   prefetch: TreePrefetch,
-  key: string
+  key: string,
+  pagePath: string,
+  rawParams: Params,
+  dynamicParamsResult: Map<string, DynamicParam>
 ): RouteTree {
   // Converts the route tree sent by the server into the format used by the
   // cache. The cached version of the tree includes additional fields, such as a
@@ -881,13 +908,35 @@ function convertTreePrefetchToRouteTree(
       )
       slots[parallelRouteKey] = convertTreePrefetchToRouteTree(
         childPrefetch,
-        childKey
+        childKey,
+        pagePath,
+        rawParams,
+        dynamicParamsResult
       )
     }
   }
+
+  const segment = prefetch.segment
+  if (Array.isArray(segment)) {
+    // This segment contains a dynamic param. Collect these as we traverse the
+    // tree and write the result to a map.
+    const segmentParamName = segment[0]
+    if (!dynamicParamsResult.has(segmentParamName)) {
+      const dynamicParamType = segment[1] as DynamicParamTypesShort
+      const dynamicParam = getDynamicParam(
+        rawParams,
+        segmentParamName,
+        dynamicParamType,
+        pagePath,
+        null
+      )
+      dynamicParamsResult.set(segmentParamName, dynamicParam)
+    }
+  }
+
   return {
     key,
-    segment: prefetch.segment,
+    segment,
     slots,
     isRootLayout: prefetch.isRootLayout,
     // This field is only relevant to dynamic routes. For a PPR/static route,
@@ -1139,20 +1188,38 @@ export async function fetchRouteOnCacheMiss(
         return null
       }
 
-      // Get the search params that were used to render the target page. This may
-      // be different from the search params in the request URL, if the page
+      // Get the params that were used to render the target page. These may
+      // be different from the params in the request URL, if the page
       // was rewritten.
+      const routeRegex = serverData.routeRegex
+      const renderedPathname = getRenderedPathname(response)
       const renderedSearch = getRenderedSearch(response)
+      const renderedParamsRaw = getRenderedParams(renderedPathname, routeRegex)
+      if (renderedParamsRaw === null) {
+        // The pathname did not match the route regex. This suggests a malformed
+        // response. The most likely cause is there was a rewrite, but it did
+        // not get propagated correctly to the Next-Rewritten-Path header.
+        rejectRouteCacheEntry(entry, Date.now() + 10 * 1000)
+        return null
+      }
+
+      const renderedParams = new Map()
+      const routeTree = convertRootTreePrefetchToRouteTree(
+        serverData,
+        renderedParamsRaw,
+        renderedParams
+      )
 
       const staleTimeMs = serverData.staleTime * 1000
       fulfillRouteCacheEntry(
         entry,
-        convertRootTreePrefetchToRouteTree(serverData),
+        routeTree,
         serverData.head,
         serverData.isHeadPartial,
         Date.now() + staleTimeMs,
         couldBeIntercepted,
         canonicalUrl,
+        renderedParams.size > 0 ? renderedParams : null,
         renderedSearch,
         routeIsPPREnabled
       )
@@ -1458,7 +1525,25 @@ function writeDynamicTreeResponseIntoCache(
   canonicalUrl: string,
   routeIsPPREnabled: boolean
 ) {
-  const normalizedFlightDataResult = normalizeFlightData(serverData.f)
+  // Get the params that were used to render the target page. This may be
+  // different from the params in the request URL, if the page was rewritten.
+  const routeRegex = serverData.r
+  const renderedSearch = getRenderedSearch(response)
+  const renderedPathname = getRenderedPathname(response)
+  const renderedParamsRaw = getRenderedParams(renderedPathname, routeRegex)
+  if (renderedParamsRaw === null) {
+    // The pathname did not match the route regex. This suggests a malformed
+    // response. The most likely cause is there was a rewrite, but it did
+    // not get propagated correctly to the Next-Rewritten-Path header.
+    rejectRouteCacheEntry(entry, now + 10 * 1000)
+    return
+  }
+
+  const normalizedFlightDataResult = normalizeFlightData(
+    serverData.f,
+    renderedParamsRaw,
+    serverData.t
+  )
   if (
     // A string result means navigating to this route will result in an
     // MPA navigation.
@@ -1492,11 +1577,6 @@ function writeDynamicTreeResponseIntoCache(
   const isResponsePartial =
     response.headers.get(NEXT_DID_POSTPONE_HEADER) === '1'
 
-  // Get the search params that were used to render the target page. This may
-  // be different from the search params in the request URL, if the page
-  // was rewritten.
-  const renderedSearch = getRenderedSearch(response)
-
   const fulfilledEntry = fulfillRouteCacheEntry(
     entry,
     convertRootFlightRouterStateToRouteTree(flightRouterState),
@@ -1505,6 +1585,7 @@ function writeDynamicTreeResponseIntoCache(
     now + staleTimeMs,
     couldBeIntercepted,
     canonicalUrl,
+    flightData.dynamicParams,
     renderedSearch,
     routeIsPPREnabled
   )
@@ -1566,7 +1647,27 @@ function writeDynamicRenderResponseIntoCache(
     }
     return null
   }
-  const flightDatas = normalizeFlightData(serverData.f)
+
+  // Get the params that were used to render the target page. This may be
+  // different from the params in the request URL, if the page was rewritten.
+  const routeRegex = serverData.r
+  const renderedPathname = getRenderedPathname(response)
+  const renderedParams = getRenderedParams(renderedPathname, routeRegex)
+  if (renderedParams === null) {
+    // The pathname did not match the route regex. This suggests a malformed
+    // response. The most likely cause is there was a rewrite, but it did
+    // not get propagated correctly to the Next-Rewritten-Path header.
+    if (spawnedEntries !== null) {
+      rejectSegmentEntriesIfStillPending(spawnedEntries, now + 10 * 1000)
+    }
+    return null
+  }
+
+  const flightDatas = normalizeFlightData(
+    serverData.f,
+    renderedParams,
+    serverData.t
+  )
   if (typeof flightDatas === 'string') {
     // This means navigating to this route will result in an MPA navigation.
     // TODO: We should cache this, too, so that the MPA navigation is immediate.
