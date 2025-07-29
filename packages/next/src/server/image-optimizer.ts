@@ -218,28 +218,11 @@ export async function detectContentType(
         return GIF
       case 'svg':
         return SVG
-      case 'jxl':
-        return JXL
-      case 'jp2':
-        return JP2
       case 'tiff':
       case 'tif':
         return TIFF
-      case 'pdf':
-        return PDF
-      case 'dcraw':
-      case 'dz':
-      case 'exr':
-      case 'fits':
       case 'heif':
-      case 'input':
-      case 'magick':
-      case 'openslide':
-      case 'ppm':
-      case 'rad':
-      case 'raw':
-      case 'v':
-      case undefined:
+        return HEIC
       default:
         return null
     }
@@ -815,7 +798,7 @@ export async function imageOptimizer(
       return {
         buffer: optimizedBuffer,
         contentType,
-        maxAge: Math.max(maxAge, nextConfig.images.minimumCacheTTL),
+        maxAge,
       }
     } else {
       throw new ImageError(500, 'Unable to optimize buffer')
@@ -826,7 +809,7 @@ export async function imageOptimizer(
       return {
         buffer: upstreamBuffer,
         contentType: upstreamType,
-        maxAge: nextConfig.images.minimumCacheTTL,
+        maxAge,
       }
     } else {
       throw new ImageError(
