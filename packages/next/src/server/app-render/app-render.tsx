@@ -1190,6 +1190,7 @@ async function renderToHTMLOrFlightImpl(
       switch (workUnitStore.type) {
         case 'prerender':
         case 'prerender-client':
+        case 'prerender-runtime':
         case 'cache':
         case 'private-cache':
           return true
