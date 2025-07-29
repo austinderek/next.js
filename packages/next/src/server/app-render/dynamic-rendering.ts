@@ -336,6 +336,21 @@ export function abortAndThrowOnSynchronousRequestDataAccess(
   )
 }
 
+/**
+ * Use this function when dynamically prerendering with dynamicIO.
+ * We don't want to error, because it's better to return something
+ * (and we've already aborted the render at the point where the sync dynamic error occured),
+ * but we should log an error server-side.
+ * @internal
+ */
+export function warnOnSyncDynamicError(dynamicTracking: DynamicTrackingState) {
+  if (dynamicTracking.syncDynamicErrorWithStack) {
+    // the server did something sync dynamic, likely
+    // leading to an early termination of the prerender.
+    console.error(dynamicTracking.syncDynamicErrorWithStack)
+  }
+}
+
 // For now these implementations are the same so we just reexport
 export const trackSynchronousRequestDataAccessInDev =
   trackSynchronousPlatformIOAccessInDev
