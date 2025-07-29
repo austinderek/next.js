@@ -102,7 +102,7 @@ jobs:
               continue
             fi
 
-            exists=$(gh pr list --state open --head "$pr_branch" --json number --jq '.[0].number')
+            exists=$(gh pr list --state open --head "$pr_branch" --json number --jq -- '.[0].number')
 
             if [ -z "$exists" ]; then
               echo "✅ Creating fork PR for upstream PR #$pr_num"
