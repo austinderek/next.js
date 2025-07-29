@@ -70,7 +70,7 @@ jobs:
 
       - name: Mirror open upstream PRs
         run: |
-          PRS=$(gh pr list -R ${UPSTREAM_OWNER}/${REPO_NAME} --state open --json number,headRefName --jq -r '.[] | @base64')
+          PRS=$(gh pr list -R ${UPSTREAM_OWNER}/${REPO_NAME} --state open --json number,headRefName --jq -r -- '.[] | @base64')
 
           for pr in $PRS; do
             _jq() {
