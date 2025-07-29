@@ -70,59 +70,66 @@ jobs:
 
       - name: Mirror open upstream PRs
         run: |
-              PRS=$(gh pr list -R ${UPSTREAM_OWNER}/${REPO_NAME} --state open --json number,headRefName --jq '.[] | [.number, .headRefName] | @tsv')
+          PRS=$(gh pr list -R ${UPSTREAM_OWNER}/${REPO_NAME} --state open --json number,headRefName --jq -r '.[] | @base64')
 
-              for line in $PRS; do
-                pr_num=$(echo "$line" | cut -f1)
-                pr_branch="upstream-pr-$pr_num"
-                upstream_ref="refs/pull/$pr_num/head"
+          for pr in $PRS; do
+            _jq() {
+              echo "$pr" | base64 --decode | jq -r "$1"
+            }
 
-                echo "🔄 Processing upstream PR #$pr_num..."
+            pr_num=$(_jq '.number')
+            pr_head=$(_jq '.headRefName')
+            pr_branch="upstream-pr-$pr_num"
+            upstream_ref="refs/pull/$pr_num/head"
 
-                # Fetch the upstream PR into a local branch
-                git fetch upstream "$upstream_ref:$pr_branch" || {
-                  echo "❌ Failed to fetch upstream PR #$pr_num"
-                  continue
-                }
+            echo "🔄 Processing upstream PR #$pr_num from branch '$pr_head'..."
 
-                # Push the branch to your fork
-                git push origin "$pr_branch" --force || {
-                  echo "❌ Failed to push $pr_branch to origin"
-                  continue
-                }
+            # Fetch the upstream PR into a local branch
+            git fetch upstream "$upstream_ref:$pr_branch" || {
+              echo "❌ Failed to fetch upstream PR #$pr_num ($pr_head)"
+              continue
+            }
 
-                # Check if the PR has actual changes
-                if git diff --quiet origin/canary origin/$pr_branch; then
-                  echo "⚠️ No changes between canary and $pr_branch — skipping PR"
-                  continue
-                fi
+            # Push the branch to your fork
+            git push origin "$pr_branch" --force || {
+              echo "❌ Failed to push $pr_branch to origin"
+              continue
+            }
 
-                if [ -z "$exists" ]; then
-                  echo "✅ Creating fork PR for upstream PR #$pr_num"
+            # Check if the PR has actual changes
+            if git diff --quiet origin/canary origin/$pr_branch; then
+              echo "⚠️ No changes between canary and $pr_branch — skipping PR"
+              continue
+            fi
 
-                  # Final verification that the branch exists remotely
-                  if git ls-remote origin "refs/heads/$pr_branch" | grep -q "$pr_branch"; then
+            exists=$(gh pr list --state open --head "$pr_branch" --json number --jq '.[0].number')
 
-                    # Confirm that the branch has actual differences
-                    if ! git diff --quiet origin/canary origin/$pr_branch; then
-                      gh pr create \
-                        --base canary \
-                        --head "$pr_branch" \
-                        --title "Mirror of upstream PR #$pr_num" \
-                        --body "This PR mirrors [upstream PR #$pr_num](https://github.com/${UPSTREAM_OWNER}/${REPO_NAME}/pull/$pr_num).\n\nAuto-synced from upstream." \
-                        || echo "❌ gh pr create failed for PR #$pr_num"
-                    else
-                      echo "⚠️ Skipping PR creation: No differences between canary and $pr_branch"
-                    fi
+            if [ -z "$exists" ]; then
+              echo "✅ Creating fork PR for upstream PR #$pr_num"
 
-                  else
-                    echo "❌ Remote branch $pr_branch not found on origin — skipping PR creation"
-                  fi
+              # Final verification that the branch exists remotely
+              if git ls-remote origin "refs/heads/$pr_branch" | grep -q "$pr_branch"; then
 
+                # Confirm that the branch has actual differences
+                if ! git diff --quiet origin/canary origin/$pr_branch; then
+                  gh pr create \
+                    --base canary \
+                    --head "$pr_branch" \
+                    --title "Mirror of upstream PR #$pr_num" \
+                    --body "This PR mirrors [upstream PR #$pr_num](https://github.com/${UPSTREAM_OWNER}/${REPO_NAME}/pull/$pr_num).\n\nAuto-synced from upstream." \
+                    || echo "❌ gh pr create failed for PR #$pr_num"
                 else
-                  echo "ℹ️ Fork PR already exists for #$pr_num"
+                  echo "⚠️ Skipping PR creation: No differences between canary and $pr_branch"
                 fi
-              done
+
+              else
+                echo "❌ Remote branch $pr_branch not found on origin — skipping PR creation"
+              fi
+
+            else
+              echo "ℹ️ Fork PR already exists for #$pr_num"
+            fi
+          done
 
       - name: Close mirrored fork PRs that are closed upstream
         run: |
