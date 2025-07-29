@@ -69,10 +69,14 @@ impl Serialize for InvalidatorMap {
     where
         S: serde::Serializer,
     {
-        // TODO: This stores `PathBuf`s, which are machine-specific, but turbo_tasks doesn't
-        // actually care about these, so we should skip serializing them entirely. Really we just
-        // need a way to store list of invalidator task ids across restarts.
-        let inner: &LockedInvalidatorMap = &self.lock().unwrap();
+        // TODO: This stores absolute `PathBuf`s, which are machine-specific. This should
+        // normalize/denormalize paths relative to the disk filesystem root.
+        //
+        // Potential optimization: We invalidate all fs reads immediately upon resuming from a
+        // persisted cache, but we don't invalidate the fs writes. Those read invalidations trigger
+        // re-inserts into the `InvalidatorMap`. If we knew that certain invalidators were only
+        // needed for reads, we could potentially avoid serializing those paths entirely.
+        let inner: &InnerMap = &self.lock().unwrap();
         serializer.serialize_newtype_struct("InvalidatorMap", inner)
     }
 }
