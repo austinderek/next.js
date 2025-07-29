@@ -87,7 +87,7 @@ pub(crate) struct DiskWatcher {
     #[serde(skip)]
     internal: Mutex<Option<DiskWatcherInternal>>,
 
-    #[serde(skip)]
+    #[serde(skip, default = "NonRecursiveDiskWatcherState::try_new")]
     pub(crate) non_recursive_state: Option<NonRecursiveDiskWatcherState>,
 }
 
@@ -96,23 +96,28 @@ impl Default for DiskWatcher {
         Self {
             ignored_subpaths: Vec::new(),
             internal: Mutex::new(None),
-            non_recursive_state: match *WATCH_RECURSIVE_MODE {
-                RecursiveMode::Recursive => None,
-                RecursiveMode::NonRecursive => Some(NonRecursiveDiskWatcherState {
-                    watching: DashSet::new(),
-                }),
-            },
+            non_recursive_state: NonRecursiveDiskWatcherState::try_new(),
         }
     }
 }
 
-/// Keeps track of which directories are currently watched. This is only used on OSs that don't
-/// efficiently support recursive watching.
+/// Extra state used by [`DiskWatcher`] when [`WATCH_RECURSIVE_MODE`] is
+/// [`RecursiveMode::NonRecursive`] (default on Linux).
 pub(crate) struct NonRecursiveDiskWatcherState {
+    /// Keeps track of which directories are currently (or were previously) watched.
     watching: DashSet<PathBuf>,
 }
 
 impl NonRecursiveDiskWatcherState {
+    fn try_new() -> Option<NonRecursiveDiskWatcherState> {
+        match *WATCH_RECURSIVE_MODE {
+            RecursiveMode::Recursive => None,
+            RecursiveMode::NonRecursive => Some(NonRecursiveDiskWatcherState {
+                watching: DashSet::new(),
+            }),
+        }
+    }
+
     /// Called after a rescan in case a previously watched-but-deleted directory was recreated.
     pub(crate) fn restore_all_watching(&self, watcher: &DiskWatcher, root_path: &Path) {
         let mut internal = watcher.internal.lock().unwrap();
