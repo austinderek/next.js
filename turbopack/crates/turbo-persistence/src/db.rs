@@ -787,15 +787,27 @@ impl TurboPersistence {
             keys_written: u64,
         }
 
+        let mut compact_config = compact_config.clone();
+        let merge_jobs = sst_by_family
+            .iter()
+            .map(|ssts_with_ranges| {
+                if compact_config.max_merge_segment_count == 0 {
+                    return Vec::new();
+                }
+                let merge_jobs = get_merge_segments(&ssts_with_ranges, &compact_config);
+                compact_config.max_merge_segment_count -= merge_jobs.len();
+                merge_jobs
+            })
+            .collect::<Vec<_>>();
+
         let result = sst_by_family
             .into_par_iter()
+            .zip(merge_jobs.into_par_iter())
             .with_min_len(1)
             .enumerate()
-            .map(|(family, ssts_with_ranges)| {
+            .map(|(family, (ssts_with_ranges, merge_jobs))| {
                 let family = family as u32;
                 let _span = span.clone().entered();
-
-                let merge_jobs = get_merge_segments(&ssts_with_ranges, compact_config);
 
                 if merge_jobs.is_empty() {
                     return Ok(PartialResultPerFamily {
