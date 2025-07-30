@@ -134,30 +134,27 @@ jobs:
 
       - name: Close mirrored fork PRs that are closed upstream
         run: |
-          # Get all open PRs in your fork that have the mirror footer in their body
-          fork_prs=$(gh pr list --state open --json number,headRefName,body --jq '.[] | select(.body | contains("This is a mirror of [upstream PR #")) | [.number, .headRefName, .body] | @tsv')
+          # Get all open upstream branch names
+          echo "🔍 Getting list of open upstream branches..."
+          upstream_open_branches=$(gh pr list -R "${UPSTREAM_OWNER}/${REPO_NAME}" --state open --json headRefName --jq -r '.[].headRefName')
+          
+          # Get all open PRs in your fork
+          echo "🔍 Getting list of open fork PRs..."
+          fork_prs=$(gh pr list --state open --json number,headRefName --jq -r '.[] | [.number, .headRefName] | @tsv')
 
-          while IFS=$'\t' read -r fork_pr_num head_branch pr_body; do
-            # Debug: Show what we're trying to match
-            echo "🔍 Fork PR #$fork_pr_num body contains: $(echo "$pr_body" | grep -o 'upstream PR #[0-9]*' || echo 'NO MATCH')"
+          if [ -z "$fork_prs" ]; then
+            echo "ℹ️ No open PRs found in fork"
+            exit 0
+          fi
+
+          while IFS=$'\t' read -r fork_pr_num head_branch; do
+            echo "🔍 Checking fork PR #$fork_pr_num with branch '$head_branch'..."
             
-            # Extract upstream PR number from the mirror footer in the body
-            # The footer format is: "🔄 **This is a mirror of [upstream PR #123](https://github.com/...)**"
-            if [[ $pr_body =~ \[upstream\ PR\ #([0-9]+)\] ]]; then
-              upstream_pr_num=${BASH_REMATCH[1]}
-              
-              echo "🔍 Checking upstream PR #$upstream_pr_num for fork PR #$fork_pr_num..."
-              
-              # Check the state of the upstream PR
-              upstream_state=$(gh pr view "$upstream_pr_num" -R ${UPSTREAM_OWNER}/${REPO_NAME} --json state --jq .state 2>/dev/null || echo "NOT_FOUND")
-
-              if [[ "$upstream_state" != "OPEN" ]]; then
-                echo "🔒 Closing fork PR #$fork_pr_num (upstream PR #$upstream_pr_num is $upstream_state)"
-                gh pr close "$fork_pr_num" --delete-branch || echo "❌ Failed to close PR #$fork_pr_num"
-              else
-                echo "✅ Fork PR #$fork_pr_num stays open (upstream PR #$upstream_pr_num is still open)"
-              fi
+            # Check if this branch name exists in the list of open upstream branches
+            if echo "$upstream_open_branches" | grep -Fxq "$head_branch"; then
+              echo "✅ Fork PR #$fork_pr_num stays open (upstream branch '$head_branch' is still open)"
             else
-              echo "⚠️ Could not extract upstream PR number from fork PR #$fork_pr_num body"
+              echo "🔒 Closing fork PR #$fork_pr_num (upstream branch '$head_branch' is no longer open)"
+              gh pr close "$fork_pr_num" --delete-branch || echo "❌ Failed to close PR #$fork_pr_num"
             fi
           done <<< "$fork_prs"
