@@ -155,6 +155,119 @@ export default function Page() {
 
 </PagesOnly>
 
+## Tailwind CSS v3 Setup
+
+If you need to support older browsers or prefer the traditional configuration approach, you can use Tailwind CSS v3:
+
+### Installing Tailwind v3
+
+Install Tailwind CSS and its peer dependencies, then run the init command to generate both `tailwind.config.js` and `postcss.config.js` files:
+
+```bash filename="Terminal"
+npm install -D tailwindcss@^3 postcss autoprefixer
+npx tailwindcss init -p
+```
+
+### Configuring Tailwind v3
+
+Configure your template paths in your `tailwind.config.js` file:
+
+<AppOnly>
+
+```js filename="tailwind.config.js"
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    './app/**/*.{js,ts,jsx,tsx,mdx}',
+    './pages/**/*.{js,ts,jsx,tsx,mdx}',
+    './components/**/*.{js,ts,jsx,tsx,mdx}',
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}
+```
+
+Add the Tailwind directives to your global CSS file:
+
+```css filename="app/globals.css"
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+```
+
+Import the CSS file in your root layout:
+
+```tsx filename="app/layout.tsx" switcher
+import './globals.css'
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  )
+}
+```
+
+```jsx filename="app/layout.js" switcher
+import './globals.css'
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  )
+}
+```
+
+</AppOnly>
+
+<PagesOnly>
+
+```js filename="tailwind.config.js"
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    './pages/**/*.{js,ts,jsx,tsx,mdx}',
+    './components/**/*.{js,ts,jsx,tsx,mdx}',
+    './app/**/*.{js,ts,jsx,tsx,mdx}',
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}
+```
+
+Add the Tailwind directives to your global CSS file:
+
+```css filename="styles/globals.css"
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+```
+
+Import the CSS file in your `pages/_app.js` file:
+
+```jsx filename="pages/_app.js"
+import '@/styles/globals.css'
+
+export default function MyApp({ Component, pageProps }) {
+  return <Component {...pageProps} />
+}
+```
+
+</PagesOnly>
+
+Now you can start using Tailwind's utility classes in your application.
+
 ## Usage with Turbopack
 
 As of Next.js 13.1, Tailwind CSS and PostCSS are supported with [Turbopack](https://turbo.build/pack/docs/features/css#tailwind-css).
