@@ -1,6 +1,6 @@
 import type { ESLint, Linter, Rule } from 'eslint'
 
-const rules: Record<string, Rule.RuleModule> = {
+const rules = {
   'google-font-display':
     require('./rules/google-font-display') as typeof import('./rules/google-font-display'),
   'google-font-preconnect':
@@ -42,9 +42,9 @@ const rules: Record<string, Rule.RuleModule> = {
   'no-typos': require('./rules/no-typos') as typeof import('./rules/no-typos'),
   'no-unwanted-polyfillio':
     require('./rules/no-unwanted-polyfillio') as typeof import('./rules/no-unwanted-polyfillio'),
-}
+} as const satisfies Record<string, Rule.RuleModule>
 
-const recommendedRules: Linter.RulesRecord = {
+const recommendedRules = {
   // warnings
   '@next/next/google-font-display': 'warn',
   '@next/next/google-font-preconnect': 'warn',
@@ -68,14 +68,14 @@ const recommendedRules: Linter.RulesRecord = {
   '@next/next/no-duplicate-head': 'error',
   '@next/next/no-head-import-in-document': 'error',
   '@next/next/no-script-component-in-head': 'error',
-}
+} as const satisfies Linter.RulesRecord
 
-const coreWebVitalsRules: Linter.RulesRecord = {
+const coreWebVitalsRules = {
   '@next/next/no-html-link-for-pages': 'error',
   '@next/next/no-sync-scripts': 'error',
-}
+} as const satisfies Linter.RulesRecord
 
-const configs: Record<string, Linter.LegacyConfig> = {
+const configs = {
   recommended: {
     plugins: ['@next/next'],
     rules: recommendedRules,
@@ -85,14 +85,14 @@ const configs: Record<string, Linter.LegacyConfig> = {
     extends: ['plugin:@next/next/recommended'],
     rules: coreWebVitalsRules,
   },
-}
+} as const satisfies Record<string, Linter.LegacyConfig>
 
-const plugin: ESLint.Plugin = {
+const plugin = {
   rules,
   configs,
-}
+} as const satisfies ESLint.Plugin
 
-const flatConfig: Record<string, Linter.Config> = {
+const flatConfig = {
   recommended: {
     name: 'next/recommended',
     plugins: {
@@ -110,7 +110,7 @@ const flatConfig: Record<string, Linter.Config> = {
       ...coreWebVitalsRules,
     },
   },
-}
+} as const satisfies Record<string, Linter.Config>
 
 export default { ...plugin, flatConfigs: flatConfig }
 export { configs, flatConfig, rules }
