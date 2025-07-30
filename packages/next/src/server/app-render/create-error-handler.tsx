@@ -91,7 +91,7 @@ export function createFlightReactServerErrorHandler(
     const span = getTracer().getActiveScopeSpan()
     if (span) {
       span.recordException(err)
-      span.setAttribute('error.type', err.message)
+      span.setAttribute('error.type', err.name)
       span.setStatus({
         code: SpanStatusCode.ERROR,
         message: err.message,
@@ -165,7 +165,7 @@ export function createHTMLReactServerErrorHandler(
       const span = getTracer().getActiveScopeSpan()
       if (span) {
         span.recordException(err)
-        span.setAttribute('error.type', err.message)
+        span.setAttribute('error.type', err.name)
         span.setStatus({
           code: SpanStatusCode.ERROR,
           message: err.message,
@@ -246,7 +246,7 @@ export function createHTMLErrorHandler(
       const span = getTracer().getActiveScopeSpan()
       if (span) {
         span.recordException(err)
-        span.setAttribute('error.type', err.message)
+        span.setAttribute('error.type', err.name)
         span.setStatus({
           code: SpanStatusCode.ERROR,
           message: err.message,
