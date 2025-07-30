@@ -136,12 +136,28 @@ jobs:
         run: |
           # Get all open PRs in your fork
           echo "🔍 Getting list of open fork PRs..."
-          fork_prs=$(gh pr list --state open --json number,headRefName | jq -r ".[] | [.number, .headRefName] | @tsv")
+          
+          # Debug: Show raw JSON output first
+          echo "📝 Raw PR data:"
+          gh pr list --state open --limit 1000 --json number,headRefName,title || echo "❌ Failed to get PR list"
+          
+          # Get the count first
+          pr_count=$(gh pr list --state open --limit 1000 --json number | jq '. | length')
+          echo "📊 Found $pr_count open PRs in fork"
+          
+          # Get formatted data
+          fork_prs=$(gh pr list --state open --limit 1000 --json number,headRefName | jq -r ".[] | [.number, .headRefName] | @tsv")
 
           if [ -z "$fork_prs" ]; then
-            echo "ℹ️ No open PRs found in fork"
+            echo "ℹ️ No open PRs found in fork (or jq processing failed)"
+            echo "🔍 Trying alternative approach..."
+            # Alternative: get data without jq processing first
+            gh pr list --state open --limit 100
             exit 0
           fi
+          
+          echo "📝 Processed fork PRs data:"
+          echo "$fork_prs"
 
           while IFS=$'\t' read -r fork_pr_num head_branch; do
             echo "🔍 Checking fork PR #$fork_pr_num with branch '$head_branch'..."
