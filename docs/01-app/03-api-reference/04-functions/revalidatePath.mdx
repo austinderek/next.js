@@ -22,12 +22,55 @@ description: API Reference for the revalidatePath function.
 revalidatePath(path: string, type?: 'page' | 'layout'): void;
 ```
 
-- `path`: Either a string representing the filesystem path associated with the data you want to revalidate (for example, `/product/[slug]/page`), or the literal route segment (for example, `/product/123`). Must be less than 1024 characters. This value is case-sensitive.
+- `path`: Either a string representing the filesystem path associated with the data you want to revalidate (for example, `/product/[slug]/page`), or the literal route segment (for example, `/product/123`). Must not exceed 1024 characters. This value is case-sensitive.
 - `type`: (optional) `'page'` or `'layout'` string to change the type of path to revalidate. If `path` contains a dynamic segment (for example, `/product/[slug]/page`), this parameter is required. If path refers to the literal route segment, e.g., `/product/1` for a dynamic page (e.g., `/product/[slug]/page`), you should not provide `type`.
 
 ## Returns
 
 `revalidatePath` does not return a value.
+
+## Relationship with `revalidateTag`
+
+`revalidatePath` and [`revalidateTag`](/docs/app/api-reference/functions/revalidateTag) serve different purposes:
+
+- **`revalidatePath`**: Revalidates a specific page or layout path
+- **`revalidateTag`**: Revalidates data with specific tags across all pages that use those tags
+
+When you call `revalidatePath`, only the specified path gets fresh data on the next visit. Other pages that use the same data tags will continue to serve cached data until those specific tags are also revalidated:
+
+```tsx
+// Page A: /blog
+const posts = await fetch('/api/posts', { next: { tags: ['posts'] } })
+
+// Page B: /dashboard
+const recentPosts = await fetch('/api/posts?limit=5', {
+  next: { tags: ['posts'] },
+})
+```
+
+After calling `revalidatePath('/blog')`:
+
+- **Page A (/blog)**: Shows fresh data (page re-rendered)
+- **Page B (/dashboard)**: Still shows stale data (cache tag 'posts' not invalidated)
+
+### Building revalidation utilities
+
+`revalidatePath` and `revalidateTag` are complementary primitives that are often used together in utility functions to ensure comprehensive data consistency across your application:
+
+```ts
+'use server'
+
+import { revalidatePath, revalidateTag } from 'next/cache'
+
+export async function updatePost() {
+  await updatePostInDatabase()
+
+  revalidatePath('/blog') // Refresh the blog page
+  revalidateTag('posts') // Refresh all pages using 'posts' tag
+}
+```
+
+This pattern ensures that both the specific page and any other pages using the same data remain consistent.
 
 ## Examples
 
