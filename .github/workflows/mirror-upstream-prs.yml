@@ -167,10 +167,10 @@ jobs:
             
             if [ "$upstream_pr_state" = "not_found" ]; then
               echo "🔒 Closing fork PR #$fork_pr_num (no corresponding upstream PR found for branch '$head_branch')"
-              gh pr close "$fork_pr_num" --delete-branch || echo "❌ Failed to close PR #$fork_pr_num"
+              gh pr close "$fork_pr_num" -R "$GITHUB_REPOSITORY" --delete-branch || echo "❌ Failed to close PR #$fork_pr_num"
             elif [ "$upstream_pr_state" = "CLOSED" ] || [ "$upstream_pr_state" = "MERGED" ]; then
               echo "� Closing fork PR #$fork_pr_num (upstream PR for branch '$head_branch' is $upstream_pr_state)"
-              gh pr close "$fork_pr_num" --delete-branch || echo "❌ Failed to close PR #$fork_pr_num"
+              gh pr close "$fork_pr_num" -R "$GITHUB_REPOSITORY" --delete-branch || echo "❌ Failed to close PR #$fork_pr_num"
             elif [ "$upstream_pr_state" = "OPEN" ]; then
               echo "✅ Fork PR #$fork_pr_num stays open (upstream PR for branch '$head_branch' is still OPEN)"
             else
