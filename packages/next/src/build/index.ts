@@ -3423,7 +3423,7 @@ export default async function build(
             return staticGenerationSpan
               .traceChild('move-exported-app-not-found-')
               .traceAsyncFn(async () => {
-                const orig = path.join(
+                const underscoreNotFoundHtml = path.join(
                   distDir,
                   'server',
                   'app',
@@ -3433,9 +3433,10 @@ export default async function build(
                   .join('pages', '404.html')
                   .replace(/\\/g, '/')
 
-                if (existsSync(orig)) {
+                // If the _not-found.html exists, use it instead of the pages 404.html
+                if (existsSync(underscoreNotFoundHtml)) {
                   await fs.copyFile(
-                    orig,
+                    underscoreNotFoundHtml,
                     path.join(distDir, 'server', updatedRelativeDest)
                   )
 
@@ -3635,6 +3636,23 @@ export default async function build(
           await fs.rm(outdir, { recursive: true, force: true })
           await writeManifest(pagesManifestPath, pagesManifest)
         })
+
+        const hasStaticAppRouterNotFound = existsSync(
+          path.join(distDir, 'server', 'app', '_not-found.html')
+        )
+        // If the _not-found.html exists, add /_not-found to the prerender manifest
+        if (hasStaticAppRouterNotFound) {
+          prerenderManifest.routes['/_not-found'] = {
+            initialRevalidateSeconds: false,
+            initialExpireSeconds: undefined,
+            experimentalPPR: undefined,
+            renderingMode: undefined,
+            srcRoute: null,
+            dataRoute: '/_not-found.rsc',
+            prefetchDataRoute: undefined,
+            allowHeader: ALLOWED_HEADERS,
+          }
+        }
 
         // As we may have modified the dynamicRoutes, we need to sort the
         // dynamic routes by page.
