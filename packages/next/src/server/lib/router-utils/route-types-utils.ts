@@ -7,7 +7,7 @@ import type { NextConfigComplete } from '../../config-shared'
 import { isParallelRouteSegment } from '../../../shared/lib/segment'
 import { mkdir } from 'fs/promises'
 import fs from 'fs'
-import { generateRouteTypesFile } from './typegen'
+import { generateRouteTypesFile, generateValidatorFile } from './typegen'
 import { tryToParsePath } from '../../../lib/try-to-parse-path'
 
 interface RouteInfo {
@@ -210,4 +210,17 @@ export async function writeRouteTypesManifest(
   }
 
   await fs.promises.writeFile(filePath, generateRouteTypesFile(manifest))
+}
+
+export async function writeValidatorFile(
+  manifest: RouteTypesManifest,
+  filePath: string
+) {
+  const dirname = path.dirname(filePath)
+
+  if (!fs.existsSync(dirname)) {
+    await mkdir(dirname, { recursive: true })
+  }
+
+  await fs.promises.writeFile(filePath, generateValidatorFile(manifest))
 }

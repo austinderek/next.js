@@ -210,13 +210,11 @@ import {
   sortPages,
   sortSortableRouteObjects,
 } from '../shared/lib/router/utils/sortable-routes'
-import {
-  generateValidatorFile,
-} from '../server/lib/router-utils/typegen'
 import { mkdir } from 'fs/promises'
 import {
   createRouteTypesManifest,
   writeRouteTypesManifest,
+  writeValidatorFile,
 } from '../server/lib/router-utils/route-types-utils'
 import { isParallelRouteSegment } from '../shared/lib/segment'
 import { ensureLeadingSlash } from '../shared/lib/page-path/ensure-leading-slash'
@@ -1308,6 +1306,11 @@ export default async function build(
         .traceChild('generate-route-types')
         .traceAsyncFn(async () => {
           const routeTypesFilePath = path.join(distDir, 'types', 'routes.d.ts')
+          const validatorFilePath = path.join(
+            distDir,
+            'types',
+            'validator.d.ts'
+          )
           await mkdir(path.dirname(routeTypesFilePath), { recursive: true })
 
           const pageRoutes: Array<{ route: string; filePath: string }> = []
@@ -1390,13 +1393,7 @@ export default async function build(
           })
 
           await writeRouteTypesManifest(routeTypesManifest, routeTypesFilePath)
-
-          // Generate validator file
-          const validatorFilePath = path.join(distDir, 'types', 'validator.ts')
-          await fs.writeFile(
-            validatorFilePath,
-            generateValidatorFile(routeTypesManifest)
-          )
+          await writeValidatorFile(routeTypesManifest, validatorFilePath)
         })
 
       // Turbopack already handles conflicting app and page routes.

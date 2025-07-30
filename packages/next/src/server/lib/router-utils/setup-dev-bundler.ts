@@ -87,6 +87,7 @@ import { JSON_CONTENT_TYPE_HEADER } from '../../../lib/constants'
 import {
   createRouteTypesManifest,
   writeRouteTypesManifest,
+  writeValidatorFile,
 } from './route-types-utils'
 import { generateValidatorFile } from './typegen'
 import { isParallelRouteSegment } from '../../../shared/lib/segment'
@@ -335,6 +336,7 @@ async function startWatcher(
     let previousConflictingPagePaths: Set<string> = new Set()
 
     const routeTypesFilePath = path.join(distDir, 'types', 'routes.d.ts')
+    const validatorFilePath = path.join(distDir, 'types', 'validator.d.ts')
 
     wp.on('aggregated', async () => {
       let middlewareMatchers: MiddlewareMatcher[] | undefined
@@ -351,7 +353,7 @@ async function startWatcher(
       const layoutRoutes: Array<{ route: string; filePath: string }> = []
       const slots: Array<{ name: string; parent: string }> = []
 
-      // Separate collections for ALL file paths (for validator.ts)
+      // Separate collections for ALL file paths (for validator.d.ts)
       const allAppPagePaths = new Set<string>()
       const allPagesPagePaths = new Set<string>()
       const allAppLayoutPaths = new Set<string>()
@@ -481,7 +483,7 @@ async function startWatcher(
 
         const relativePath = path.relative(dir, fileName)
 
-        // Collect ALL file paths for validator.ts (before any filtering)
+        // Collect ALL file paths for validator.d.ts (before any filtering)
         if (opts.nextConfig.experimental.typedRoutes) {
           if (isAppPath && layoutFileRegex.test(fileName)) {
             allAppLayoutPaths.add(relativePath)
@@ -1044,13 +1046,8 @@ async function startWatcher(
           })
 
           await writeRouteTypesManifest(routeTypesManifest, routeTypesFilePath)
+          await writeValidatorFile(routeTypesManifest, validatorFilePath)
         }
-
-        // Generate validator file
-        await fs.promises.writeFile(
-          validatorFilePath,
-          generateValidatorFile(newRouteTypesManifest)
-        )
 
         if (!resolved) {
           resolve()
