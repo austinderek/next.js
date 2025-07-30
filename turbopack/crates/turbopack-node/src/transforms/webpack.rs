@@ -362,14 +362,15 @@ pub enum InfoMessage {
     // Sent to inform Turbopack about the dependencies of the task.
     // All fields are `default` since it is ok for the client to
     // simply omit instead of sending empty arrays.
+    #[serde(rename_all = "camelCase")]
     Dependencies {
-        #[serde(default, rename = "envVariables")]
+        #[serde(default)]
         env_variables: Vec<RcStr>,
-        #[serde(default, rename = "filePaths")]
+        #[serde(default)]
         file_paths: Vec<RcStr>,
         #[serde(default)]
         directories: Vec<(RcStr, RcStr)>,
-        #[serde(default, rename = "buildFilePaths")]
+        #[serde(default)]
         build_file_paths: Vec<RcStr>,
     },
     EmittedError {
