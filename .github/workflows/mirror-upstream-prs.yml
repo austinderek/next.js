@@ -138,8 +138,12 @@ jobs:
           fork_prs=$(gh pr list --state open --json number,headRefName,body --jq '.[] | select(.body | contains("This is a mirror of [upstream PR #")) | [.number, .headRefName, .body] | @tsv')
 
           while IFS=$'\t' read -r fork_pr_num head_branch pr_body; do
+            # Debug: Show what we're trying to match
+            echo "🔍 Fork PR #$fork_pr_num body contains: $(echo "$pr_body" | grep -o 'upstream PR #[0-9]*' || echo 'NO MATCH')"
+            
             # Extract upstream PR number from the mirror footer in the body
-            if [[ $pr_body =~ upstream\ PR\ \#([0-9]+) ]]; then
+            # The footer format is: "🔄 **This is a mirror of [upstream PR #123](https://github.com/...)**"
+            if [[ $pr_body =~ \[upstream\ PR\ #([0-9]+)\] ]]; then
               upstream_pr_num=${BASH_REMATCH[1]}
               
               echo "🔍 Checking upstream PR #$upstream_pr_num for fork PR #$fork_pr_num..."
