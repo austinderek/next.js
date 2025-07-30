@@ -531,7 +531,10 @@ describe('opentelemetry', () => {
           })
 
           it('should handle error in RSC', async () => {
-            await next.fetch('/app/param/rsc-fetch/error', env.fetchInit)
+            await next.fetch(
+              '/app/param/rsc-fetch/error?status=error',
+              env.fetchInit
+            )
 
             await expectTrace(getCollector(), [
               {
@@ -540,7 +543,7 @@ describe('opentelemetry', () => {
                   'http.method': 'GET',
                   'http.route': '/app/[param]/rsc-fetch/error',
                   'http.status_code': 500,
-                  'http.target': '/app/param/rsc-fetch/error',
+                  'http.target': '/app/param/rsc-fetch/error?status=error',
                   'next.route': '/app/[param]/rsc-fetch/error',
                   'next.rsc': false,
                   'next.span_name': 'GET /app/[param]/rsc-fetch/error',
