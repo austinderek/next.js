@@ -715,10 +715,7 @@ export async function imageOptimizer(
 ): Promise<{ buffer: Buffer; contentType: string; maxAge: number }> {
   const { href, quality, width, mimeType } = paramsResult
   const upstreamBuffer = imageUpstream.buffer
-  const maxAge = Math.max(
-    nextConfig.images.minimumCacheTTL,
-    getMaxAge(imageUpstream.cacheControl)
-  )
+  const maxAge = getMaxAge(imageUpstream.cacheControl)
   const upstreamType = await detectContentType(upstreamBuffer)
 
   if (
@@ -798,7 +795,7 @@ export async function imageOptimizer(
       return {
         buffer: optimizedBuffer,
         contentType,
-        maxAge,
+        maxAge: Math.max(maxAge, nextConfig.images.minimumCacheTTL),
       }
     } else {
       throw new ImageError(500, 'Unable to optimize buffer')
@@ -809,7 +806,7 @@ export async function imageOptimizer(
       return {
         buffer: upstreamBuffer,
         contentType: upstreamType,
-        maxAge,
+        maxAge: nextConfig.images.minimumCacheTTL,
       }
     } else {
       throw new ImageError(
