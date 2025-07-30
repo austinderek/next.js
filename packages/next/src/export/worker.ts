@@ -238,15 +238,15 @@ async function exportPageImpl(
     
     if (isPageMetadataRoute) {
       // Extract the original file extension from the page path
-      const pageExt = extname(page)
-      if (pageExt) {
+      const actualPageExt = extname(page)
+      if (actualPageExt) {
         // For metadata routes, we want to preserve the file extension
         // so static file servers can serve them with correct MIME types
         // This fixes the issue where opengraph-image.png was served as /opengraph-image
         // instead of /opengraph-image.png, causing static file servers to serve
         // the file as application/octet-stream instead of the proper image MIME type
         const basePath = path.replace(/\.html$/, '')
-        htmlFilename = subFolders ? `${basePath}${sep}index${pageExt}` : `${basePath}${pageExt}`
+        htmlFilename = subFolders ? `${basePath}${sep}index${actualPageExt}` : `${basePath}${actualPageExt}`
       }
     }
   }
