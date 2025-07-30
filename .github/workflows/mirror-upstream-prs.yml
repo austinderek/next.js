@@ -134,16 +134,26 @@ jobs:
 
       - name: Close mirrored fork PRs that are closed upstream
         run: |
-          fork_prs=$(gh pr list --state open --json number,headRefName,title --jq '.[] | select(.title | test("Mirror of upstream PR #[0-9]+")) | [.number, .headRefName] | @tsv')
+          # Get all open PRs in your fork that have the mirror footer in their body
+          fork_prs=$(gh pr list --state open --json number,headRefName,body --jq '.[] | select(.body | contains("This is a mirror of [upstream PR #")) | [.number, .headRefName, .body] | @tsv')
 
-          while IFS=$'\t' read -r fork_pr_num head_branch; do
-            if [[ $head_branch =~ upstream-pr-([0-9]+) ]]; then
+          while IFS=$'\t' read -r fork_pr_num head_branch pr_body; do
+            # Extract upstream PR number from the mirror footer in the body
+            if [[ $pr_body =~ upstream\ PR\ \#([0-9]+) ]]; then
               upstream_pr_num=${BASH_REMATCH[1]}
-              upstream_state=$(gh pr view "$upstream_pr_num" -R ${UPSTREAM_OWNER}/${REPO_NAME} --json state --jq .state)
+              
+              echo "🔍 Checking upstream PR #$upstream_pr_num for fork PR #$fork_pr_num..."
+              
+              # Check the state of the upstream PR
+              upstream_state=$(gh pr view "$upstream_pr_num" -R ${UPSTREAM_OWNER}/${REPO_NAME} --json state --jq .state 2>/dev/null || echo "NOT_FOUND")
 
               if [[ "$upstream_state" != "OPEN" ]]; then
-                echo "Closing fork PR #$fork_pr_num (upstream PR #$upstream_pr_num is $upstream_state)"
-                gh pr close "$fork_pr_num" --delete-branch
+                echo "🔒 Closing fork PR #$fork_pr_num (upstream PR #$upstream_pr_num is $upstream_state)"
+                gh pr close "$fork_pr_num" --delete-branch || echo "❌ Failed to close PR #$fork_pr_num"
+              else
+                echo "✅ Fork PR #$fork_pr_num stays open (upstream PR #$upstream_pr_num is still open)"
               fi
+            else
+              echo "⚠️ Could not extract upstream PR number from fork PR #$fork_pr_num body"
             fi
           done <<< "$fork_prs"
