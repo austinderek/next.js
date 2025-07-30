@@ -1,3 +1,3 @@
-export default async function Page() {
-  throw new Error('Error')
+export default function Page() {
+  throw new Error('Error from Server Component')
 }

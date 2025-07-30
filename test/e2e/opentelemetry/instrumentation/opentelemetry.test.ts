@@ -545,6 +545,7 @@ describe('opentelemetry', () => {
                   'next.rsc': false,
                   'next.span_name': 'GET /app/[param]/rsc-fetch/error',
                   'next.span_type': 'BaseServer.handleRequest',
+                  'error.type': '500',
                 },
                 kind: 1,
                 status: { code: 2 },
@@ -620,7 +621,7 @@ describe('opentelemetry', () => {
                       },
                       {
                         attributes: {
-                          'next.clientComponentLoadCount': 8,
+                          'next.clientComponentLoadCount': isNextDev ? 9 : 8,
                           'next.span_type':
                             'NextNodeServer.clientComponentLoading',
                         },
