@@ -78,12 +78,6 @@ impl DiskWatcherInternal {
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct DiskWatcher {
-    /// Array of paths that should not notify invalidations.
-    /// `notify` currently doesn't support unwatching subpaths from the root,
-    /// so underlying we still watches filesystem event but only skips to
-    /// invalidate.
-    ignored_subpaths: Vec<PathBuf>,
-
     #[serde(skip)]
     internal: Mutex<Option<DiskWatcherInternal>>,
 
@@ -94,7 +88,6 @@ pub(crate) struct DiskWatcher {
 impl Default for DiskWatcher {
     fn default() -> Self {
         Self {
-            ignored_subpaths: Vec::new(),
             internal: Mutex::new(None),
             non_recursive_state: NonRecursiveDiskWatcherState::try_new(),
         }
@@ -220,11 +213,8 @@ impl NonRecursiveDiskWatcherState {
 }
 
 impl DiskWatcher {
-    pub(crate) fn new(ignored_subpaths: Vec<PathBuf>) -> Self {
-        Self {
-            ignored_subpaths,
-            ..Default::default()
-        }
+    pub(crate) fn new() -> Self {
+        Default::default()
     }
 
     /// Create a watcher and start watching by creating `debounced` watcher
@@ -407,18 +397,7 @@ impl DiskWatcher {
                             break;
                         }
 
-                        let paths: Vec<PathBuf> = event
-                            .paths
-                            .iter()
-                            .filter(|p| {
-                                !self
-                                    .ignored_subpaths
-                                    .iter()
-                                    .any(|ignored| p.starts_with(ignored))
-                            })
-                            .cloned()
-                            .collect();
-
+                        let paths: Vec<PathBuf> = event.paths;
                         if paths.is_empty() {
                             // this event isn't useful, but keep trying to process the batch
                             event_result = rx.try_recv();
