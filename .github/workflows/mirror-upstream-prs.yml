@@ -136,7 +136,7 @@ jobs:
         run: |
           # Get all open upstream branch names
           echo "🔍 Getting list of open upstream branches..."
-          upstream_open_branches=$(gh pr list -R "${UPSTREAM_OWNER}/${REPO_NAME}" --state open --json headRefName --jq -r ".[].headRefName")
+          upstream_open_branches=$(gh pr list -R "${UPSTREAM_OWNER}/${REPO_NAME}" --state open --json headRefName | jq -r ".[].headRefName")
           echo "📝 Found upstream branches: $upstream_open_branches"
           
           if [ -z "$upstream_open_branches" ]; then
@@ -146,7 +146,7 @@ jobs:
           
           # Get all open PRs in your fork
           echo "🔍 Getting list of open fork PRs..."
-          fork_prs=$(gh pr list --state open --json number,headRefName --jq -r ".[] | [.number, .headRefName] | @tsv")
+          fork_prs=$(gh pr list --state open --json number,headRefName | jq -r ".[] | [.number, .headRefName] | @tsv")
 
           if [ -z "$fork_prs" ]; then
             echo "ℹ️ No open PRs found in fork"
