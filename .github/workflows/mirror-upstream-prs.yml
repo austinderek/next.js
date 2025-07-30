@@ -134,16 +134,6 @@ jobs:
 
       - name: Close mirrored fork PRs that are closed upstream
         run: |
-          # Get all open upstream branch names
-          echo "🔍 Getting list of open upstream branches..."
-          upstream_open_branches=$(gh pr list -R "${UPSTREAM_OWNER}/${REPO_NAME}" --state open --json headRefName | jq -r ".[].headRefName")
-          echo "📝 Found upstream branches: $upstream_open_branches"
-          
-          if [ -z "$upstream_open_branches" ]; then
-            echo "⚠️ No open upstream branches found or command failed"
-            exit 0
-          fi
-          
           # Get all open PRs in your fork
           echo "🔍 Getting list of open fork PRs..."
           fork_prs=$(gh pr list --state open --json number,headRefName | jq -r ".[] | [.number, .headRefName] | @tsv")
@@ -156,11 +146,18 @@ jobs:
           while IFS=$'\t' read -r fork_pr_num head_branch; do
             echo "🔍 Checking fork PR #$fork_pr_num with branch '$head_branch'..."
             
-            # Check if this branch name exists in the list of open upstream branches
-            if echo "$upstream_open_branches" | grep -Fxq "$head_branch"; then
-              echo "✅ Fork PR #$fork_pr_num stays open (upstream branch '$head_branch' is still open)"
-            else
-              echo "🔒 Closing fork PR #$fork_pr_num (upstream branch '$head_branch' is no longer open)"
+            # Check if there's a corresponding upstream PR for this branch and its state
+            upstream_pr_state=$(gh pr list -R "${UPSTREAM_OWNER}/${REPO_NAME}" --head "$head_branch" --json state | jq -r ".[0].state // \"not_found\"")
+            
+            if [ "$upstream_pr_state" = "not_found" ]; then
+              echo "🔒 Closing fork PR #$fork_pr_num (no corresponding upstream PR found for branch '$head_branch')"
               gh pr close "$fork_pr_num" --delete-branch || echo "❌ Failed to close PR #$fork_pr_num"
+            elif [ "$upstream_pr_state" = "CLOSED" ] || [ "$upstream_pr_state" = "MERGED" ]; then
+              echo "� Closing fork PR #$fork_pr_num (upstream PR for branch '$head_branch' is $upstream_pr_state)"
+              gh pr close "$fork_pr_num" --delete-branch || echo "❌ Failed to close PR #$fork_pr_num"
+            elif [ "$upstream_pr_state" = "OPEN" ]; then
+              echo "✅ Fork PR #$fork_pr_num stays open (upstream PR for branch '$head_branch' is still OPEN)"
+            else
+              echo "⚠️ Unknown upstream PR state '$upstream_pr_state' for branch '$head_branch' - keeping fork PR #$fork_pr_num open"
             fi
           done <<< "$fork_prs"
