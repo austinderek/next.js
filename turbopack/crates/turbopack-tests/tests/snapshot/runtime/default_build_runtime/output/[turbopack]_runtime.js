@@ -51,17 +51,21 @@ function getOverwrittenModule(moduleCache, id) {
     if (toStringTag) defineProp(exports, toStringTag, {
         value: 'Module'
     });
-    for(const key in getters){
-        const item = getters[key];
-        if (Array.isArray(item)) {
-            defineProp(exports, key, {
-                get: item[0],
-                set: item[1],
+    let i = 0;
+    while(i < getters.length){
+        const propName = getters[i++];
+        // TODO(luke.sandberg): we could support raw values here, but would need a discriminator beyond 'not a function'
+        const getter = getters[i++];
+        if (typeof getters[i] === 'function') {
+            // a setter
+            defineProp(exports, propName, {
+                get: getter,
+                set: getters[i++],
                 enumerable: true
             });
         } else {
-            defineProp(exports, key, {
-                get: item,
+            defineProp(exports, propName, {
+                get: getter,
                 enumerable: true
             });
         }
@@ -72,10 +76,12 @@ function getOverwrittenModule(moduleCache, id) {
  * Makes the module an ESM with exports
  */ function esmExport(getters, id) {
     let module = this.m;
-    let exports = this.e;
+    let exports;
     if (id != null) {
         module = getOverwrittenModule(this.c, id);
         exports = module.exports;
+    } else {
+        exports = this.e;
     }
     module.namespaceObject = module.exports;
     esm(exports, getters);
@@ -158,16 +164,19 @@ function createGetter(obj, key) {
  *   * `false`: will have the raw module as default export
  *   * `true`: will have the default property as default export
  */ function interopEsm(raw, ns, allowExportDefault) {
-    const getters = Object.create(null);
+    const getters = [];
+    let foundDefault = false;
     for(let current = raw; (typeof current === 'object' || typeof current === 'function') && !LEAF_PROTOTYPES.includes(current); current = getProto(current)){
         for (const key of Object.getOwnPropertyNames(current)){
-            getters[key] = createGetter(raw, key);
+            getters.push(key, createGetter(raw, key));
+            if (!foundDefault) foundDefault = key === 'default';
         }
     }
     // this is not really correct
     // we should set the `default` getter if the imported module is a `.cjs file`
-    if (!(allowExportDefault && 'default' in getters)) {
-        getters['default'] = ()=>raw;
+    if (!(allowExportDefault && foundDefault)) {
+        // put it at the front to ensure it is respected.
+        getters.unshift('default', ()=>raw);
     }
     esm(ns, getters);
     return ns;

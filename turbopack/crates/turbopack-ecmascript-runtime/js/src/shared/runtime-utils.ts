@@ -101,20 +101,24 @@ function createModuleObject(id: ModuleId): Module {
  */
 function esm(
   exports: Exports,
-  getters: Record<string, (() => any) | [() => any, (v: any) => void]>
+  getters: Array<string | (() => unknown) | ((v: unknown) => void)>
 ) {
   defineProp(exports, '__esModule', { value: true })
   if (toStringTag) defineProp(exports, toStringTag, { value: 'Module' })
-  for (const key in getters) {
-    const item = getters[key]
-    if (Array.isArray(item)) {
-      defineProp(exports, key, {
-        get: item[0],
-        set: item[1],
+  let i = 0
+  while (i < getters.length) {
+    const propName = getters[i++] as string
+    // TODO(luke.sandberg): we could support raw values here, but would need a discriminator beyond 'not a function'
+    const getter = getters[i++] as () => unknown
+    if (typeof getters[i] === 'function') {
+      // a setter
+      defineProp(exports, propName, {
+        get: getter,
+        set: getters[i++] as (v: unknown) => void,
         enumerable: true,
       })
     } else {
-      defineProp(exports, key, { get: item, enumerable: true })
+      defineProp(exports, propName, { get: getter, enumerable: true })
     }
   }
   Object.seal(exports)
@@ -125,14 +129,16 @@ function esm(
  */
 function esmExport(
   this: TurbopackBaseContext<Module>,
-  getters: Record<string, () => any>,
+  getters: Array<string | (() => unknown) | ((v: unknown) => void)>,
   id: ModuleId | undefined
 ) {
   let module = this.m
-  let exports = this.e
+  let exports
   if (id != null) {
     module = getOverwrittenModule(this.c, id)
     exports = module.exports
+  } else {
+    exports = this.e
   }
   module.namespaceObject = module.exports
   esm(exports, getters)
@@ -246,7 +252,8 @@ function interopEsm(
   ns: EsmNamespaceObject,
   allowExportDefault?: boolean
 ) {
-  const getters: { [s: string]: () => any } = Object.create(null)
+  const getters: Array<string | (() => unknown) | ((v: unknown) => void)> = []
+  let foundDefault = false
   for (
     let current = raw;
     (typeof current === 'object' || typeof current === 'function') &&
@@ -254,14 +261,16 @@ function interopEsm(
     current = getProto(current)
   ) {
     for (const key of Object.getOwnPropertyNames(current)) {
-      getters[key] = createGetter(raw, key)
+      getters.push(key, createGetter(raw, key))
+      if (!foundDefault) foundDefault = key === 'default'
     }
   }
 
   // this is not really correct
   // we should set the `default` getter if the imported module is a `.cjs file`
-  if (!(allowExportDefault && 'default' in getters)) {
-    getters['default'] = () => raw
+  if (!(allowExportDefault && foundDefault)) {
+    // put it at the front to ensure it is respected.
+    getters.unshift('default', () => raw)
   }
 
   esm(ns, getters)

@@ -5,10 +5,12 @@
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
 
-__turbopack_context__.s({
-    "close": ()=>close,
-    "dbCall": ()=>dbCall
-});
+__turbopack_context__.s([
+    "close",
+    ()=>close,
+    "dbCall",
+    ()=>dbCall
+]);
 const connectToDB = async (url)=>{
     console.log('connecting to db', url);
     await new Promise((r)=>setTimeout(r, 1000));
@@ -31,9 +33,10 @@ __turbopack_async_result__();
 
 return __turbopack_context__.a(async (__turbopack_handle_async_dependencies__, __turbopack_async_result__) => { try {
 
-__turbopack_context__.s({
-    "createUser": ()=>createUser
-});
+__turbopack_context__.s([
+    "createUser",
+    ()=>createUser
+]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$turbopack$2f$crates$2f$turbopack$2d$tests$2f$tests$2f$snapshot$2f$basic$2f$top$2d$level$2d$await$2f$input$2f$db$2d$connection$2e$js__$5b$test$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/turbopack/crates/turbopack-tests/tests/snapshot/basic/top-level-await/input/db-connection.js [test] (ecmascript)");
 var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
     __TURBOPACK__imported__module__$5b$project$5d2f$turbopack$2f$crates$2f$turbopack$2d$tests$2f$tests$2f$snapshot$2f$basic$2f$top$2d$level$2d$await$2f$input$2f$db$2d$connection$2e$js__$5b$test$5d$__$28$ecmascript$29$__

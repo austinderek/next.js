@@ -110,11 +110,10 @@ pub const TURBOPACK_WASM_MODULE: &TurbopackRuntimeFunctionShortcut =
 
 /// Adding an entry to this list will automatically ensure that `__turbopack_XXX__` can be called
 /// from user code (by inserting a replacement into free_var_references)
-pub const TURBOPACK_RUNTIME_FUNCTION_SHORTCUTS: [(&str, &TurbopackRuntimeFunctionShortcut); 23] = [
+pub const TURBOPACK_RUNTIME_FUNCTION_SHORTCUTS: [(&str, &TurbopackRuntimeFunctionShortcut); 22] = [
     ("__turbopack_require__", TURBOPACK_REQUIRE),
     ("__turbopack_module_context__", TURBOPACK_MODULE_CONTEXT),
     ("__turbopack_import__", TURBOPACK_IMPORT),
-    ("__turbopack_esm__", TURBOPACK_ESM),
     ("__turbopack_export_value__", TURBOPACK_EXPORT_VALUE),
     ("__turbopack_export_namespace__", TURBOPACK_EXPORT_NAMESPACE),
     ("__turbopack_cache__", TURBOPACK_CACHE),
