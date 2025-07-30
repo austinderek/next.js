@@ -138,21 +138,21 @@ jobs:
           echo "🔍 Getting list of open fork PRs..."
           
           # Debug: Show raw JSON output first
-          echo "📝 Raw PR data:"
-          gh pr list --state open --limit 1000 --json number,headRefName,title || echo "❌ Failed to get PR list"
+          echo "📝 Raw PR data from fork repository ($GITHUB_REPOSITORY):"
+          gh pr list -R "$GITHUB_REPOSITORY" --state open --limit 1000 --json number,headRefName,title || echo "❌ Failed to get PR list"
           
           # Get the count first
-          pr_count=$(gh pr list --state open --limit 1000 --json number | jq '. | length')
-          echo "📊 Found $pr_count open PRs in fork"
+          pr_count=$(gh pr list -R "$GITHUB_REPOSITORY" --state open --limit 1000 --json number | jq '. | length')
+          echo "📊 Found $pr_count open PRs in fork ($GITHUB_REPOSITORY)"
           
           # Get formatted data
-          fork_prs=$(gh pr list --state open --limit 1000 --json number,headRefName | jq -r ".[] | [.number, .headRefName] | @tsv")
+          fork_prs=$(gh pr list -R "$GITHUB_REPOSITORY" --state open --limit 1000 --json number,headRefName | jq -r ".[] | [.number, .headRefName] | @tsv")
 
           if [ -z "$fork_prs" ]; then
             echo "ℹ️ No open PRs found in fork (or jq processing failed)"
             echo "🔍 Trying alternative approach..."
             # Alternative: get data without jq processing first
-            gh pr list --state open --limit 100
+            gh pr list -R "$GITHUB_REPOSITORY" --state open --limit 100
             exit 0
           fi
           
