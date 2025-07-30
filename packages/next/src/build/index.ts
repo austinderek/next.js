@@ -3648,8 +3648,8 @@ export default async function build(
             experimentalPPR: undefined,
             renderingMode: undefined,
             srcRoute: null,
-            dataRoute: '/_not-found.rsc',
-            prefetchDataRoute: undefined,
+            dataRoute: null,
+            prefetchDataRoute: null,
             allowHeader: ALLOWED_HEADERS,
           }
         }
