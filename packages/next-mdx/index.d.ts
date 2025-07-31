@@ -2,6 +2,16 @@ import type { NextConfig } from 'next'
 import type { Options } from '@mdx-js/loader'
 import type { RuleSetConditionAbsolute } from 'webpack'
 
+declare module 'mdx/types.js' {
+  /** @internal This makes the MDX types understand React. */
+  namespace JSX {
+    type Element = React.JSX.Element
+    type ElementClass = React.JSX.ElementClass
+    type ElementType = React.JSX.ElementType
+    type IntrinsicElements = React.JSX.IntrinsicElements
+  }
+}
+
 type WithMDX = (config: NextConfig) => NextConfig
 
 declare namespace nextMDX {
