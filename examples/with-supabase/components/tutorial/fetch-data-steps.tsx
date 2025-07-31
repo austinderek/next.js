@@ -3,20 +3,50 @@ import { CodeBlock } from "./code-block";
 
 const create = `create table notes (
   id bigserial primary key,
-  title text
+  title text,
+  created_at timestamp with time zone default now(),
+  user_id uuid references auth.users(id) on delete cascade
 );
 
-insert into notes(title)
+-- Enable Row Level Security
+alter table notes enable row level security;
+
+-- Create policy to allow users to see only their own notes
+create policy "Users can view their own notes" on notes
+  for select using (auth.uid() = user_id);
+
+-- Create policy to allow users to insert their own notes
+create policy "Users can insert their own notes" on notes
+  for insert with check (auth.uid() = user_id);
+
+-- Create policy to allow users to update their own notes
+create policy "Users can update their own notes" on notes
+  for update using (auth.uid() = user_id);
+
+-- Create policy to allow users to delete their own notes
+create policy "Users can delete their own notes" on notes
+  for delete using (auth.uid() = user_id);
+
+insert into notes(title, user_id)
 values
-  ('Today I created a Supabase project.'),
-  ('I added some data and queried it from Next.js.'),
-  ('It was awesome!');
+  ('Today I created a Supabase project.', auth.uid()),
+  ('I added some data and queried it from Next.js.', auth.uid()),
+  ('It was awesome!', auth.uid());
 `.trim();
 
 const server = `import { createClient } from '@/utils/supabase/server'
 
 export default async function Page() {
   const supabase = await createClient()
+  
+  // Get the current user
+  const { data: { user } } = await supabase.auth.getUser()
+  
+  if (!user) {
+    return <div>Please sign in to view your notes.</div>
+  }
+  
+  // Query notes for the current user (RLS will automatically filter)
   const { data: notes } = await supabase.from('notes').select()
 
   return <pre>{JSON.stringify(notes, null, 2)}</pre>
@@ -30,15 +60,27 @@ import { useEffect, useState } from 'react'
 
 export default function Page() {
   const [notes, setNotes] = useState<any[] | null>(null)
+  const [user, setUser] = useState<any>(null)
   const supabase = createClient()
 
   useEffect(() => {
     const getData = async () => {
-      const { data } = await supabase.from('notes').select()
-      setNotes(data)
+      // Get the current user
+      const { data: { user } } = await supabase.auth.getUser()
+      setUser(user)
+      
+      if (user) {
+        // Query notes for the current user (RLS will automatically filter)
+        const { data } = await supabase.from('notes').select()
+        setNotes(data)
+      }
     }
     getData()
   }, [])
+
+  if (!user) {
+    return <div>Please sign in to view your notes.</div>
+  }
 
   return <pre>{JSON.stringify(notes, null, 2)}</pre>
 }
