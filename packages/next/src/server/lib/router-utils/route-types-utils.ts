@@ -23,6 +23,10 @@ export interface RouteTypesManifest {
   redirectRoutes: Record<string, RouteInfo>
   /** Map of rewrite source => RouteInfo */
   rewriteRoutes: Record<string, RouteInfo>
+  /** File paths for validation */
+  appPagePaths: Set<string>
+  pagesRouterPagePaths: Set<string>
+  layoutPaths: Set<string>
 }
 
 // Convert a custom-route source string (`/blog/:slug`, `/docs/:path*`, ...)
@@ -123,6 +127,15 @@ export async function createRouteTypesManifest({
     layoutRoutes: {},
     redirectRoutes: {},
     rewriteRoutes: {},
+    appPagePaths: new Set(
+      appRoutes.map(({ filePath }) => path.relative(dir, filePath))
+    ),
+    pagesRouterPagePaths: new Set(
+      pageRoutes.map(({ filePath }) => path.relative(dir, filePath))
+    ),
+    layoutPaths: new Set(
+      layoutRoutes.map(({ filePath }) => path.relative(dir, filePath))
+    ),
   }
 
   // Process page routes

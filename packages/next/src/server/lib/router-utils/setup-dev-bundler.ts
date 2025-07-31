@@ -89,7 +89,6 @@ import {
   writeRouteTypesManifest,
   writeValidatorFile,
 } from './route-types-utils'
-import { generateValidatorFile } from './typegen'
 import { isParallelRouteSegment } from '../../../shared/lib/segment'
 import { ensureLeadingSlash } from '../../../shared/lib/page-path/ensure-leading-slash'
 
@@ -223,6 +222,9 @@ async function startWatcher(
       layoutRoutes: {},
       redirectRoutes: {},
       rewriteRoutes: {},
+      appPagePaths: new Set(),
+      pagesRouterPagePaths: new Set(),
+      layoutPaths: new Set(),
     },
     path.join(distTypesDir, 'routes.d.ts')
   )
@@ -353,11 +355,6 @@ async function startWatcher(
       const layoutRoutes: Array<{ route: string; filePath: string }> = []
       const slots: Array<{ name: string; parent: string }> = []
 
-      // Separate collections for ALL file paths (for validator.d.ts)
-      const allAppPagePaths = new Set<string>()
-      const allPagesPagePaths = new Set<string>()
-      const allAppLayoutPaths = new Set<string>()
-
       let envChange = false
       let tsconfigChange = false
       let conflictingPageChange = 0
@@ -480,19 +477,6 @@ async function startWatcher(
 
         // Collect all current filenames for the TS plugin to use
         devPageFiles.add(fileName)
-
-        const relativePath = path.relative(dir, fileName)
-
-        // Collect ALL file paths for validator.d.ts (before any filtering)
-        if (opts.nextConfig.experimental.typedRoutes) {
-          if (isAppPath && layoutFileRegex.test(fileName)) {
-            allAppLayoutPaths.add(relativePath)
-          } else if (isAppPath && validFileMatcher.isAppRouterPage(fileName)) {
-            allAppPagePaths.add(relativePath)
-          } else if (!isAppPath && validFileMatcher.isPageFile(fileName)) {
-            allPagesPagePaths.add(relativePath)
-          }
-        }
 
         let pageName = absolutePathToPage(fileName, {
           dir: isAppPath ? appDir! : pagesDir!,
@@ -618,7 +602,6 @@ async function startWatcher(
             continue
           }
         } else {
-          // pages directory
           if (useFileSystemPublicRoutes) {
             pageFiles.add(pageName)
             // always add to nextDataRoutes for now but in future only add

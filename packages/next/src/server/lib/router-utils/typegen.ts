@@ -143,11 +143,9 @@ export function generateValidatorFile(
 
   const generateValidations = (
     paths: string[],
-    type:
-      | 'PageConfig'
-      | 'LayoutConfig'
-      | 'RouteHandlerConfig'
-      | 'ApiRouteConfig'
+    type: 'PageConfig' | 'LayoutConfig'
+    // | 'RouteHandlerConfig'
+    // | 'ApiRouteConfig'
   ) =>
     paths
       .sort()
@@ -166,18 +164,18 @@ export function generateValidatorFile(
     Array.from(routesManifest.appPagePaths),
     'PageConfig'
   )
-  const appRouteHandlerValidations = generateValidations(
-    Array.from(routesManifest.appRouteHandlerPaths),
-    'RouteHandlerConfig'
-  )
+  // const appRouteHandlerValidations = generateValidations(
+  //   Array.from(routesManifest.appRouteHandlerPaths),
+  //   'RouteHandlerConfig'
+  // )
   const pagesRouterPageValidations = generateValidations(
     Array.from(routesManifest.pagesRouterPagePaths),
     'PageConfig'
   )
-  const pagesApiRouteValidations = generateValidations(
-    Array.from(routesManifest.pagesApiRoutePaths),
-    'ApiRouteConfig'
-  )
+  // const pagesApiRouteValidations = generateValidations(
+  //   Array.from(routesManifest.pagesApiRoutePaths),
+  //   'ApiRouteConfig'
+  // )
   const layoutValidations = generateValidations(
     Array.from(routesManifest.layoutPaths),
     'LayoutConfig'
@@ -223,6 +221,7 @@ type LayoutConfig = {
   experimental_ppr?: boolean
 }
 
+/*
 type RouteHandlerConfig = {
   GET?: (request: Request, context: { params: Promise<any> }) => Promise<Response> | Response
   POST?: (request: Request, context: { params: Promise<any> }) => Promise<Response> | Response
@@ -251,14 +250,15 @@ type ApiRouteConfig = {
     }
   }
 }
+*/
 
 ${appPageValidations}
 
-${appRouteHandlerValidations}
+${/*appRouteHandlerValidations*/ ''}
 
 ${pagesRouterPageValidations}
 
-${pagesApiRouteValidations}
+${/*pagesApiRouteValidations*/ ''}
 
 ${layoutValidations}
 `
