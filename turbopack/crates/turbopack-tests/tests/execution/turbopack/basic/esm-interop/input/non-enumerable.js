@@ -1,4 +1,8 @@
 class Y {
+  get base() {
+    return 'base'
+  }
+
   get named() {
     return 'base-named'
   }
