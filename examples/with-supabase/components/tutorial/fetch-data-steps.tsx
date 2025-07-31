@@ -15,6 +15,18 @@ alter table notes enable row level security;
 create policy "Users can view their own notes" on notes
   for select using (auth.uid() = user_id);
 
+-- Create policy to allow users to insert their own notes
+create policy "Users can insert their own notes" on notes
+  for insert with check (auth.uid() = user_id);
+
+-- Create policy to allow users to update their own notes
+create policy "Users can update their own notes" on notes
+  for update using (auth.uid() = user_id);
+
+-- Create policy to allow users to delete their own notes
+create policy "Users can delete their own notes" on notes
+  for delete using (auth.uid() = user_id);
+
 -- Insert some sample data (using a placeholder UUID for demonstration)
 insert into notes(title, user_id)
 values
