@@ -135,7 +135,10 @@ unsafe impl GlobalAlloc for TurboMalloc {
         let old_size = unsafe { base_alloc_size(ptr, layout) };
         let ret = unsafe { base_alloc().realloc(ptr, layout, new_size) };
         if !ret.is_null() {
-            let new_size = unsafe { base_alloc_size(ret, layout) };
+            // SAFETY: the caller must ensure that the `new_size` does not overflow.
+            // `layout.align()` comes from a `Layout` and is thus guaranteed to be valid.
+            let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, layout.align()) };
+            let new_size = unsafe { base_alloc_size(ret, new_layout) };
             update(old_size, new_size);
         }
         ret
