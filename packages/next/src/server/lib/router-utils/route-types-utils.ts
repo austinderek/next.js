@@ -27,6 +27,8 @@ export interface RouteTypesManifest {
   appPagePaths: Set<string>
   pagesRouterPagePaths: Set<string>
   layoutPaths: Set<string>
+  appRouteHandlers: Set<string>
+  pageApiRoutes: Set<string>
 }
 
 // Convert a custom-route source string (`/blog/:slug`, `/docs/:path*`, ...)
@@ -108,6 +110,8 @@ export async function createRouteTypesManifest({
   dir,
   pageRoutes,
   appRoutes,
+  appRouteHandlers,
+  pageApiRoutes,
   layoutRoutes,
   slots,
   redirects,
@@ -116,6 +120,8 @@ export async function createRouteTypesManifest({
   dir: string
   pageRoutes: Array<{ route: string; filePath: string }>
   appRoutes: Array<{ route: string; filePath: string }>
+  appRouteHandlers: Array<{ route: string; filePath: string }>
+  pageApiRoutes: Array<{ route: string; filePath: string }>
   layoutRoutes: Array<{ route: string; filePath: string }>
   slots: Array<{ name: string; parent: string }>
   redirects?: NextConfigComplete['redirects']
@@ -127,6 +133,12 @@ export async function createRouteTypesManifest({
     layoutRoutes: {},
     redirectRoutes: {},
     rewriteRoutes: {},
+    appRouteHandlers: new Set(
+      appRouteHandlers.map(({ filePath }) => path.relative(dir, filePath))
+    ),
+    pageApiRoutes: new Set(
+      pageApiRoutes.map(({ filePath }) => path.relative(dir, filePath))
+    ),
     appPagePaths: new Set(
       appRoutes.map(({ filePath }) => path.relative(dir, filePath))
     ),

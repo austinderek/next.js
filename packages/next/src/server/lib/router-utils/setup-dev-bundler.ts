@@ -225,6 +225,8 @@ async function startWatcher(
       appPagePaths: new Set(),
       pagesRouterPagePaths: new Set(),
       layoutPaths: new Set(),
+      appRouteHandlers: new Set(),
+      pageApiRoutes: new Set(),
     },
     path.join(distTypesDir, 'routes.d.ts')
   )
@@ -349,6 +351,8 @@ async function startWatcher(
       const conflictingAppPagePaths = new Set<string>()
       const appPageFilePaths = new Map<string, string>()
       const pagesPageFilePaths = new Map<string, string>()
+      const appRouteHandlers: Array<{ route: string; filePath: string }> = []
+      const pageApiRoutes: Array<{ route: string; filePath: string }> = []
 
       const pageRoutes: Array<{ route: string; filePath: string }> = []
       const appRoutes: Array<{ route: string; filePath: string }> = []
@@ -593,10 +597,17 @@ async function startWatcher(
             appFiles.add(pageName)
           }
 
-          appRoutes.push({
-            route: normalizePathSep(pageName),
-            filePath: fileName,
-          })
+          if (validFileMatcher.isAppRouterRoute(fileName)) {
+            appRouteHandlers.push({
+              route: normalizePathSep(pageName),
+              filePath: fileName,
+            })
+          } else {
+            appRoutes.push({
+              route: normalizePathSep(pageName),
+              filePath: fileName,
+            })
+          }
 
           if (routedPages.includes(pageName)) {
             continue
@@ -609,10 +620,17 @@ async function startWatcher(
             opts.fsChecker.nextDataRoutes.add(pageName)
           }
 
-          pageRoutes.push({
-            route: normalizePathSep(pageName),
-            filePath: fileName,
-          })
+          if (pageName.startsWith('/api/')) {
+            pageApiRoutes.push({
+              route: normalizePathSep(pageName),
+              filePath: fileName,
+            })
+          } else {
+            pageRoutes.push({
+              route: normalizePathSep(pageName),
+              filePath: fileName,
+            })
+          }
         }
 
         // Record pages
@@ -1026,6 +1044,8 @@ async function startWatcher(
             slots,
             redirects: opts.nextConfig.redirects,
             rewrites: opts.nextConfig.rewrites,
+            appRouteHandlers,
+            pageApiRoutes,
           })
 
           await writeRouteTypesManifest(routeTypesManifest, routeTypesFilePath)

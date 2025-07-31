@@ -90,6 +90,10 @@ export function createValidFileMatcher(
       pageExtensions
     )}$`
   )
+
+  const leafOnlyRouteFileRegex = new RegExp(
+    `(^route|[\\\\/]route)\\.${getExtensionRegexString(pageExtensions)}$`
+  )
   const leafOnlyLayoutFileRegex = new RegExp(
     `(^(layout)|[\\\\/](layout))\\.${getExtensionRegexString(pageExtensions)}$`
   )
@@ -126,6 +130,11 @@ export function createValidFileMatcher(
     return leafOnlyPageFileRegex.test(filePath) || isMetadataFile(filePath)
   }
 
+  // Determine if the file is leaf node route file under app directory
+  function isAppRouterRoute(filePath: string) {
+    return leafOnlyRouteFileRegex.test(filePath)
+  }
+
   function isAppLayoutPage(filePath: string) {
     return leafOnlyLayoutFileRegex.test(filePath)
   }
@@ -148,6 +157,7 @@ export function createValidFileMatcher(
   return {
     isPageFile,
     isAppRouterPage,
+    isAppRouterRoute,
     isAppLayoutPage,
     isMetadataFile,
     isRootNotFound,

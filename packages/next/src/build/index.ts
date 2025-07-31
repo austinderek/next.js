@@ -1318,16 +1318,26 @@ export default async function build(
           const layoutRoutes: Array<{ route: string; filePath: string }> = []
           const slots: Array<{ name: string; parent: string }> = []
 
+          const pageApiRoutes: Array<{ route: string; filePath: string }> = []
+          const appRouteHandlers: Array<{ route: string; filePath: string }> =
+            []
+
           // Build pages routes
           for (const [route, filePath] of Object.entries(mappedPages)) {
-            // Only filter out _app, _error, _document, and API routes
-            // (TODO) should we filter out API routes?
-            if (isReservedPage(route)) continue
+            if (route.startsWith('/api/')) {
+              pageApiRoutes.push({
+                route: normalizePathSep(route),
+                filePath: filePath.replace(/^private-next-pages\//, 'pages/'),
+              })
+            } else {
+              // Filter out _app, _error, _document
+              if (isReservedPage(route)) continue
 
-            pageRoutes.push({
-              route: normalizePathSep(route),
-              filePath: filePath.replace(/^private-next-pages\//, 'pages/'),
-            })
+              pageRoutes.push({
+                route: normalizePathSep(route),
+                filePath: filePath.replace(/^private-next-pages\//, 'pages/'),
+              })
+            }
           }
 
           // Build app routes
@@ -1360,10 +1370,17 @@ export default async function build(
                 }
               }
 
-              appRoutes.push({
-                route: normalizeAppPath(normalizePathSep(route)),
-                filePath: filePath.replace(/^private-next-app-dir\//, 'app/'),
-              })
+              if (validFileMatcher.isAppRouterRoute(filePath)) {
+                appRouteHandlers.push({
+                  route: normalizeAppPath(normalizePathSep(route)),
+                  filePath: filePath.replace(/^private-next-app-dir\//, 'app/'),
+                })
+              } else {
+                appRoutes.push({
+                  route: normalizeAppPath(normalizePathSep(route)),
+                  filePath: filePath.replace(/^private-next-app-dir\//, 'app/'),
+                })
+              }
             }
           }
 
@@ -1386,6 +1403,8 @@ export default async function build(
             dir,
             pageRoutes,
             appRoutes,
+            appRouteHandlers,
+            pageApiRoutes,
             layoutRoutes,
             slots,
             redirects: config.redirects,
