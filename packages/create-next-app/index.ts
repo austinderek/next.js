@@ -49,6 +49,7 @@ const program = new Command(packageJson.name)
   .option('--ts, --typescript', 'Initialize as a TypeScript project. (default)')
   .option('--js, --javascript', 'Initialize as a JavaScript project.')
   .option('--tailwind', 'Initialize with Tailwind CSS config. (default)')
+  .option('--react-compiler', 'Initialize with React Compiler enabled.')
   .option('--eslint', 'Initialize with ESLint config.')
   .option('--app', 'Initialize as an App Router project.')
   .option('--src-dir', "Initialize inside a 'src/' directory.")
@@ -237,6 +238,7 @@ async function run(): Promise<void> {
       empty: false,
       turbopack: true,
       disableGit: false,
+      reactCompiler: false,
     }
     const getPrefOrDefault = (field: string) =>
       preferences[field] ?? defaults[field]
@@ -293,6 +295,29 @@ async function run(): Promise<void> {
         })
         opts.eslint = Boolean(eslint)
         preferences.eslint = Boolean(eslint)
+      }
+    }
+
+    if (
+      !opts.reactCompiler &&
+      !args.includes('--no-react-compiler') &&
+      !opts.api
+    ) {
+      if (skipPrompt) {
+        opts.reactCompiler = getPrefOrDefault('reactCompiler')
+      } else {
+        const styledReactCompiler = blue('React Compiler')
+        const { reactCompiler } = await prompts({
+          onState: onPromptState,
+          type: 'toggle',
+          name: 'reactCompiler',
+          message: `Would you like to use ${styledReactCompiler} (Release Candidate)?`,
+          initial: getPrefOrDefault('reactCompiler'),
+          active: 'Yes',
+          inactive: 'No',
+        })
+        opts.reactCompiler = Boolean(reactCompiler)
+        preferences.reactCompiler = Boolean(reactCompiler)
       }
     }
 
@@ -435,6 +460,7 @@ async function run(): Promise<void> {
       turbopack: opts.turbopack,
       rspack: opts.rspack,
       disableGit: opts.disableGit,
+      reactCompiler: opts.reactCompiler,
     })
   } catch (reason) {
     if (!(reason instanceof DownloadError)) {
@@ -468,6 +494,7 @@ async function run(): Promise<void> {
       turbopack: opts.turbopack,
       rspack: opts.rspack,
       disableGit: opts.disableGit,
+      reactCompiler: opts.reactCompiler,
     })
   }
   conf.set('preferences', preferences)
