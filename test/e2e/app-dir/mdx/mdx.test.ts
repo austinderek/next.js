@@ -70,7 +70,7 @@ for (const type of ['with-mdx-rs', 'without-mdx-rs']) {
           const $ = await next.render$('/recma-plugin')
           const html = $('html').html()
           expect(html.includes('recma-plugin/page.mdx')).toBe(true)
-          expect($('#rehype-plugin').text()).toBe('Recma plugin')
+          expect($('#recma-plugin').text()).toBe('Recma plugin')
         })
 
         it('should run rehype plugins', async () => {
