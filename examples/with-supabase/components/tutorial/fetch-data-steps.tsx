@@ -23,7 +23,7 @@ values
   ('It was awesome!', '00000000-0000-0000-0000-000000000000');
 `.trim();
 
-const server = `import { createClient } from '@/utils/supabase/server'
+const server = `import { createClient } from '@/lib/supabase/server'
 
 export default async function Page() {
   const supabase = await createClient()
@@ -55,7 +55,7 @@ export default async function Page() {
 
 const client = `'use client'
 
-import { createClient } from '@/utils/supabase/client'
+import { createClient } from '@/lib/supabase/client'
 import { useEffect, useState } from 'react'
 
 export default function Page() {
