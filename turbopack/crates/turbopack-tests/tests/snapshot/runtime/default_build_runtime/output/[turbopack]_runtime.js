@@ -165,18 +165,25 @@ function createGetter(obj, key) {
  *   * `true`: will have the default property as default export
  */ function interopEsm(raw, ns, allowExportDefault) {
     const getters = [];
-    let foundDefault = false;
+    // The index of the `default` export if any
+    let defaultLocation = -1;
     for(let current = raw; (typeof current === 'object' || typeof current === 'function') && !LEAF_PROTOTYPES.includes(current); current = getProto(current)){
         for (const key of Object.getOwnPropertyNames(current)){
             getters.push(key, createGetter(raw, key));
-            if (!foundDefault) foundDefault = key === 'default';
+            if (defaultLocation === -1 && key === 'default') {
+                defaultLocation = getters.length - 1;
+            }
         }
     }
     // this is not really correct
     // we should set the `default` getter if the imported module is a `.cjs file`
-    if (!(allowExportDefault && foundDefault)) {
-        // put it at the front to ensure it is respected.
-        getters.unshift('default', ()=>raw);
+    if (!(allowExportDefault && defaultLocation >= 0)) {
+        // Replace the binding with one for the namespace itself in order to preserve iteration order.
+        if (defaultLocation >= 0) {
+            getters[defaultLocation] = ()=>raw;
+        } else {
+            getters.push('default', ()=>raw);
+        }
     }
     esm(ns, getters);
     return ns;
