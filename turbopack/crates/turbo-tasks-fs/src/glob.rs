@@ -193,6 +193,8 @@ mod tests {
     #[case::alternatives_nested2("{a,b/c,d/e/{f,g/h}}", "b/c")]
     #[case::alternatives_nested3("{a,b/c,d/e/{f,g/h}}", "d/e/f")]
     #[case::alternatives_nested4("{a,b/c,d/e/{f,g/h}}", "d/e/g/h")]
+    #[case::alternatives_empty1("react{,-dom}", "react")]
+    #[case::alternatives_empty2("react{,-dom}", "react-dom")]
     #[case::alternatives_chars("[abc]", "b")]
     fn glob_match(#[case] glob: &str, #[case] path: &str) {
         let glob = Glob::parse(glob).unwrap();
