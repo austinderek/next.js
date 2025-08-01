@@ -439,7 +439,7 @@ export default abstract class Server<
     this.experimentalTestProxy = experimentalTestProxy
     this.serverOptions = options
 
-    this.dir = path.resolve(dir)
+    this.dir = path.resolve(/* turbopackIgnore: true */ dir)
 
     this.quiet = quiet
     this.loadEnvConfig({ dev })
@@ -453,7 +453,10 @@ export default abstract class Server<
       this.fetchHostname = formatHostname(this.hostname)
     }
     this.port = port
-    this.distDir = path.join(this.dir, this.nextConfig.distDir)
+    this.distDir = path.join(
+      /* turbopackIgnore: true */ this.dir,
+      this.nextConfig.distDir
+    )
     this.publicDir = this.getPublicDir()
     this.hasStaticDir = !minimalMode && this.getHasStaticDir()
 

@@ -141,6 +141,7 @@ async function writeToCacheDir(
   upstreamEtag: string
 ) {
   const filename = join(
+    /* turbopackIgnore: true */
     dir,
     `${maxAge}.${expireAt}.${etag}.${upstreamEtag}.${extension}`
   )
@@ -464,20 +465,25 @@ export class ImageOptimizerCache {
     distDir: string
     nextConfig: NextConfigComplete
   }) {
-    this.cacheDir = join(distDir, 'cache', 'images')
+    this.cacheDir = join(/* turbopackIgnore: true */ distDir, 'cache', 'images')
     this.nextConfig = nextConfig
   }
 
   async get(cacheKey: string): Promise<IncrementalResponseCacheEntry | null> {
     try {
-      const cacheDir = join(this.cacheDir, cacheKey)
+      const cacheDir = join(/* turbopackIgnore: true */ this.cacheDir, cacheKey)
       const files = await promises.readdir(cacheDir)
       const now = Date.now()
 
       for (const file of files) {
         const [maxAgeSt, expireAtSt, etag, upstreamEtag, extension] =
           file.split('.', 5)
-        const buffer = await promises.readFile(join(cacheDir, file))
+        const buffer = await promises.readFile(
+          /* turbopackIgnore: true */ join(
+            /* turbopackIgnore: true */ cacheDir,
+            file
+          )
+        )
         const expireAt = Number(expireAtSt)
         const maxAge = Number(maxAgeSt)
 
@@ -530,7 +536,7 @@ export class ImageOptimizerCache {
 
     try {
       await writeToCacheDir(
-        join(this.cacheDir, cacheKey),
+        join(/* turbopackIgnore: true */ this.cacheDir, cacheKey),
         value.extension,
         revalidate,
         expireAt,
