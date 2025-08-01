@@ -213,12 +213,19 @@ export function generateValidatorFile(
 // This file validates that all pages and layouts export the correct types
 
 import type { AppRoutes, AppRouteHandlerRoutes, LayoutRoutes, ParamMap } from "./routes"
+import type { ResolvingMetadata, ResolvingViewport } from "next/dist/lib/metadata/types/metadata-interface.js"
 
 type AppPageConfig<Route extends AppRoutes = AppRoutes> = {
   default: React.ComponentType<PageProps<Route>>
   generateStaticParams?: () => Promise<any[]> | any[]
-  generateMetadata?: (props: PageProps<Route>, parent: any) => Promise<any> | any
-  generateViewport?: (props: PageProps<Route>, parent: any) => Promise<any> | any
+  generateMetadata?: (
+    props: PageProps<Route>,
+    parent: ResolvingMetadata
+  ) => Promise<any> | any
+  generateViewport?: (
+    props: PageProps<Route>,
+    parent: ResolvingViewport
+  ) => Promise<any> | any
   metadata?: any
   viewport?: any
 }
@@ -228,13 +235,30 @@ type PagesPageConfig = {
   getStaticProps?: (context: any) => Promise<any> | any
   getStaticPaths?: (context: any) => Promise<any> | any
   getServerSideProps?: (context: any) => Promise<any> | any
+  getInitialProps?: (context: any) => Promise<any> | any
+  /**
+   * Segment configuration for legacy Pages Router pages.
+   * Validated at build-time by parsePagesSegmentConfig.
+   */
+  config?: {
+    amp?: boolean | 'hybrid'
+    maxDuration?: number
+    runtime?: 'edge' | 'experimental-edge' | 'nodejs'
+    regions?: string[]
+  }
 }
 
 type LayoutConfig<Route extends LayoutRoutes = LayoutRoutes> = {
   default: React.ComponentType<LayoutProps<Route>>
   generateStaticParams?: () => Promise<any[]> | any[]
-  generateMetadata?: (props: LayoutProps<Route>, parent: any) => Promise<any> | any
-  generateViewport?: (props: LayoutProps<Route>, parent: any) => Promise<any> | any
+  generateMetadata?: (
+    props: LayoutProps<Route>,
+    parent: ResolvingMetadata
+  ) => Promise<any> | any
+  generateViewport?: (
+    props: LayoutProps<Route>,
+    parent: ResolvingViewport
+  ) => Promise<any> | any
   metadata?: any
   viewport?: any
 }
