@@ -990,7 +990,8 @@ pub(crate) async fn analyse_ecmascript_module_internal(
     .instrument(span)
     .await?;
 
-    let span = tracing::info_span!("effects processing");
+    let span = tracing::info_span!("effects processing", count = var_graph.effects.len());
+
     async {
         let effects = take(&mut var_graph.effects);
 
@@ -1042,6 +1043,29 @@ pub(crate) async fn analyse_ecmascript_module_internal(
                     .lock()
                     .extend(effects.into_iter().map(Action::Effect).rev())
             };
+
+            // match effect {
+            //     Effect::Unreachable { .. } => {
+            //         tracing::event!(tracing::Level::INFO, name = "Unreachable")
+            //     }
+            //     Effect::Conditional { .. } => {
+            //         tracing::event!(tracing::Level::INFO, name = "Conditional")
+            //     }
+            //     Effect::Call { .. } => tracing::event!(tracing::Level::INFO, name = "Call"),
+            //     Effect::MemberCall { .. } => {
+            //         tracing::event!(tracing::Level::INFO, name = "MemberCall")
+            //     }
+            //     Effect::Member { .. } => tracing::event!(tracing::Level::INFO, name = "Member"),
+            //     Effect::ImportedBinding { .. } => {
+            //         tracing::event!(tracing::Level::INFO, name = "ImportedBinding")
+            //     }
+            //     Effect::FreeVar { .. } => tracing::event!(tracing::Level::INFO, name =
+            // "FreeVar"),     Effect::TypeOf { .. } =>
+            // tracing::event!(tracing::Level::INFO, name = "TypeOf"),
+            //     Effect::ImportMeta { .. } => {
+            //         tracing::event!(tracing::Level::INFO, name = "ImportMeta")
+            //     }
+            // };
 
             match effect {
                 Effect::Unreachable { start_ast_path } => {
@@ -1336,15 +1360,22 @@ pub(crate) async fn analyse_ecmascript_module_internal(
                     span,
                     in_try: _,
                 } => {
-                    // Intentionally not awaited because `handle_member` reads this only when needed
-                    let obj = analysis_state.link_value(*obj, ImportAttributes::empty_ref());
+                    let analysis = &mut analysis;
+                    let analysis_state = &analysis_state;
+                    async move {
+                        // Intentionally not awaited because `handle_member` reads this only when
+                        // needed
+                        let obj = analysis_state.link_value(*obj, ImportAttributes::empty_ref());
 
-                    let prop = analysis_state
-                        .link_value(*prop, ImportAttributes::empty_ref())
-                        .await?;
+                        let prop = analysis_state
+                            .link_value(*prop, ImportAttributes::empty_ref())
+                            .await?;
 
-                    handle_member(&ast_path, obj, prop, span, &analysis_state, &mut analysis)
-                        .await?;
+                        handle_member(&ast_path, obj, prop, span, analysis_state, analysis).await?;
+                        anyhow::Ok(())
+                    }
+                    .instrument(tracing::info_span!("handle member"))
+                    .await?;
                 }
                 Effect::ImportedBinding {
                     esm_reference_index,
