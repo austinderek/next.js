@@ -148,6 +148,10 @@ const getOrInstantiateModuleFromParent: GetOrInstantiateModuleFromParent<
   }
 
   if (module) {
+    if (module.error) {
+      throw module.error
+    }
+
     if (module.parents.indexOf(sourceModule.id) === -1) {
       module.parents.push(sourceModule.id)
     }
@@ -234,7 +238,6 @@ function instantiateModule(
     throw error
   }
 
-  module.loaded = true
   if (module.namespaceObject && module.exports !== module.namespaceObject) {
     // in case of a circular dependency: cjs1 -> esm2 -> cjs1
     interopEsm(module.exports, module.namespaceObject)

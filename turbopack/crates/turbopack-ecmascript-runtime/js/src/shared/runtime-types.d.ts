@@ -101,7 +101,6 @@ type ExternalImport = (
 interface Module {
   exports: Function | Exports | Promise<Exports> | AsyncModulePromise
   error: Error | undefined
-  loaded: boolean
   id: ModuleId
   namespaceObject?:
     | EsmNamespaceObject

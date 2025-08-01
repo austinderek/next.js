@@ -89,7 +89,6 @@ function createModuleObject(id: ModuleId): Module {
   return {
     exports: {},
     error: undefined,
-    loaded: false,
     id,
     namespaceObject: undefined,
     [REEXPORTED_OBJECTS]: undefined,
@@ -299,7 +298,6 @@ function esmImport(
   id: ModuleId
 ): Exclude<Module['namespaceObject'], undefined> {
   const module = getOrInstantiateModuleFromParent(id, this.m)
-  if (module.error) throw module.error
 
   // any ES module has to have `module.namespaceObject` defined.
   if (module.namespaceObject) return module.namespaceObject
@@ -341,9 +339,7 @@ function commonJsRequire(
   this: TurbopackBaseContext<Module>,
   id: ModuleId
 ): Exports {
-  const module = getOrInstantiateModuleFromParent(id, this.m)
-  if (module.error) throw module.error
-  return module.exports
+  return getOrInstantiateModuleFromParent(id, this.m).exports
 }
 contextPrototype.r = commonJsRequire
 
