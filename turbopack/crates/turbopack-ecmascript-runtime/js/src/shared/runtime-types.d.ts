@@ -116,7 +116,7 @@ interface ModuleWithDirection extends Module {
 
 interface TurbopackBaseContext<M> {
   a: AsyncModule
-  e: Module['exports']
+  e: Exports
   r: CommonJsRequire
   t: RuntimeRequire
   f: ModuleContextFactory

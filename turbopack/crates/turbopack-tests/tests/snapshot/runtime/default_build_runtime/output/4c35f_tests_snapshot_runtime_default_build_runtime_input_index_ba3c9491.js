@@ -1,11 +1,9 @@
 module.exports = {
 
-"[project]/turbopack/crates/turbopack-tests/tests/snapshot/runtime/default_build_runtime/input/index.js [test] (ecmascript)": ((__turbopack_context__) => {
+"[project]/turbopack/crates/turbopack-tests/tests/snapshot/runtime/default_build_runtime/input/index.js [test] (ecmascript)": ((__turbopack_context__, module, exports) => {
 
-var { m: module, e: exports } = __turbopack_context__;
-{
 console.log('Hello, world!');
-}}),
+}),
 
 };
 

@@ -22,9 +22,16 @@ const REEXPORTED_OBJECTS = Symbol('reexported objects')
 /**
  * Constructs the `__turbopack_context__` object for a module.
  */
-function Context(this: TurbopackBaseContext<Module>, module: Module) {
+function Context(
+  this: TurbopackBaseContext<Module>,
+  module: Module,
+  exports: Module['exports']
+) {
   this.m = module
-  this.e = module.exports
+  // We need to store this here instead of accessing it from the module object to:
+  // 1. make it available to factories directly, since we rewrite `this` to this property
+  // 2. support async modules which rewrite `module.exports` to a promise.
+  this.e = exports
 }
 const contextPrototype = Context.prototype as TurbopackBaseContext<Module>
 
@@ -145,11 +152,16 @@ function esmExport(
 }
 contextPrototype.s = esmExport
 
-function ensureDynamicExports(module: Module, exports: Exports) {
-  let reexportedObjects = module[REEXPORTED_OBJECTS]
+type ReexportedObjects = Record<PropertyKey, unknown>[]
+function ensureDynamicExports(
+  module: Module,
+  exports: Exports
+): ReexportedObjects {
+  let reexportedObjects: ReexportedObjects | undefined =
+    module[REEXPORTED_OBJECTS]
 
   if (!reexportedObjects) {
-    reexportedObjects = module[REEXPORTED_OBJECTS] = []
+    module[REEXPORTED_OBJECTS] = reexportedObjects = []
     module.exports = module.namespaceObject = new Proxy(exports, {
       get(target, prop) {
         if (
@@ -176,6 +188,7 @@ function ensureDynamicExports(module: Module, exports: Exports) {
       },
     })
   }
+  return reexportedObjects
 }
 
 /**
@@ -186,16 +199,19 @@ function dynamicExport(
   object: Record<string, any>,
   id: ModuleId | undefined
 ) {
-  let module = this.m
-  let exports = this.e
+  let module: Module
+  let exports: Module['exports']
   if (id != null) {
     module = getOverwrittenModule(this.c, id)
     exports = module.exports
+  } else {
+    module = this.m
+    exports = this.e
   }
-  ensureDynamicExports(module, exports)
+  const reexportedObjects = ensureDynamicExports(module, exports)
 
   if (typeof object === 'object' && object !== null) {
-    module[REEXPORTED_OBJECTS]!.push(object)
+    reexportedObjects.push(object)
   }
 }
 contextPrototype.j = dynamicExport
@@ -205,9 +221,11 @@ function exportValue(
   value: any,
   id: ModuleId | undefined
 ) {
-  let module = this.m
+  let module: Module
   if (id != null) {
     module = getOverwrittenModule(this.c, id)
+  } else {
+    module = this.m
   }
   module.exports = value
 }
@@ -218,9 +236,11 @@ function exportNamespace(
   namespace: any,
   id: ModuleId | undefined
 ) {
-  let module = this.m
+  let module: Module
   if (id != null) {
     module = getOverwrittenModule(this.c, id)
+  } else {
+    module = this.m
   }
   module.exports = module.namespaceObject = namespace
 }
@@ -623,7 +643,7 @@ function requireStub(_moduleId: ModuleId): never {
 contextPrototype.z = requireStub
 
 type ContextConstructor<M> = {
-  new (module: Module): TurbopackBaseContext<M>
+  new (module: Module, exports: Exports): TurbopackBaseContext<M>
 }
 
 function applyModuleFactoryName(factory: Function) {
