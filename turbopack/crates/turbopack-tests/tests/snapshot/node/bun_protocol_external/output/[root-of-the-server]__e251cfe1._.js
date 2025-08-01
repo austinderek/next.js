@@ -52,7 +52,7 @@ module.exports = mod;
 "use strict";
 
 // Test that Bun builtins are treated as external
-__turbopack_context__.s({});
+__turbopack_context__.s([]);
 var __TURBOPACK__imported__module__$5b$externals$5d2f$bun$3a$ffi__$5b$external$5d$__$28$bun$3a$ffi$2c$__cjs$29$__ = __turbopack_context__.i("[externals]/bun:ffi [external] (bun:ffi, cjs)");
 var __TURBOPACK__imported__module__$5b$externals$5d2f$bun$3a$jsc__$5b$external$5d$__$28$bun$3a$jsc$2c$__cjs$29$__ = __turbopack_context__.i("[externals]/bun:jsc [external] (bun:jsc, cjs)");
 var __TURBOPACK__imported__module__$5b$externals$5d2f$bun$3a$sqlite__$5b$external$5d$__$28$bun$3a$sqlite$2c$__cjs$29$__ = __turbopack_context__.i("[externals]/bun:sqlite [external] (bun:sqlite, cjs)");
