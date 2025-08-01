@@ -36,7 +36,6 @@ function getOverwrittenModule(moduleCache, id) {
     return {
         exports: {},
         error: undefined,
-        loaded: false,
         id,
         namespaceObject: undefined,
         [REEXPORTED_OBJECTS]: undefined
@@ -199,7 +198,6 @@ function createNS(raw) {
 }
 function esmImport(id) {
     const module = getOrInstantiateModuleFromParent(id, this.m);
-    if (module.error) throw module.error;
     // any ES module has to have `module.namespaceObject` defined.
     if (module.namespaceObject) return module.namespaceObject;
     // only ESM can be an async module, so we don't need to worry about exports being a promise here.
@@ -220,9 +218,7 @@ typeof require === 'function' ? require : function require1() {
 };
 contextPrototype.t = runtimeRequire;
 function commonJsRequire(id) {
-    const module = getOrInstantiateModuleFromParent(id, this.m);
-    if (module.error) throw module.error;
-    return module.exports;
+    return getOrInstantiateModuleFromParent(id, this.m).exports;
 }
 contextPrototype.r = commonJsRequire;
 /**
@@ -704,6 +700,9 @@ function instantiateModule(id, sourceType, sourceData) {
 function getOrInstantiateModuleFromParent(id, sourceModule) {
     const module1 = moduleCache[id];
     if (module1) {
+        if (module1.error) {
+            throw module1.error;
+        }
         return module1;
     }
     return instantiateModule(id, 1, sourceModule.id);

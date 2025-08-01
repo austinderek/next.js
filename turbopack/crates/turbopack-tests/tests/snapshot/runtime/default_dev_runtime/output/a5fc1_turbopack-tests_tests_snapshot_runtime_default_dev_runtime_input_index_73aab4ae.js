@@ -47,7 +47,6 @@ function getOverwrittenModule(moduleCache, id) {
     return {
         exports: {},
         error: undefined,
-        loaded: false,
         id,
         namespaceObject: undefined,
         [REEXPORTED_OBJECTS]: undefined
@@ -210,7 +209,6 @@ function createNS(raw) {
 }
 function esmImport(id) {
     const module = getOrInstantiateModuleFromParent(id, this.m);
-    if (module.error) throw module.error;
     // any ES module has to have `module.namespaceObject` defined.
     if (module.namespaceObject) return module.namespaceObject;
     // only ESM can be an async module, so we don't need to worry about exports being a promise here.
@@ -231,9 +229,7 @@ typeof require === 'function' ? require : function require1() {
 };
 contextPrototype.t = runtimeRequire;
 function commonJsRequire(id) {
-    const module = getOrInstantiateModuleFromParent(id, this.m);
-    if (module.error) throw module.error;
-    return module.exports;
+    return getOrInstantiateModuleFromParent(id, this.m).exports;
 }
 contextPrototype.r = commonJsRequire;
 /**
@@ -745,6 +741,9 @@ const getOrInstantiateModuleFromParent = (id, sourceModule)=>{
         sourceModule.children.push(id);
     }
     if (module) {
+        if (module.error) {
+            throw module.error;
+        }
         if (module.parents.indexOf(sourceModule.id) === -1) {
             module.parents.push(sourceModule.id);
         }
@@ -804,7 +803,6 @@ function instantiateModule(moduleId, sourceType, sourceData) {
         module.error = error;
         throw error;
     }
-    module.loaded = true;
     if (module.namespaceObject && module.exports !== module.namespaceObject) {
         // in case of a circular dependency: cjs1 -> esm2 -> cjs1
         interopEsm(module.exports, module.namespaceObject);
