@@ -195,7 +195,7 @@ pub async fn next_server_nft_assets(project: Vc<Project>) -> Result<Vc<OutputAss
         ResolvedVc::upcast(
             ServerNftJsonAsset::new(
                 project,
-                RcStr::from("next-server.turbo"),
+                RcStr::from("next-server"),
                 Vc::cell(server_entries),
                 Glob::alternatives(server_ignores_glob),
             )
@@ -205,7 +205,7 @@ pub async fn next_server_nft_assets(project: Vc<Project>) -> Result<Vc<OutputAss
         ResolvedVc::upcast(
             ServerNftJsonAsset::new(
                 project,
-                RcStr::from("next-minimal-server.turbo"),
+                RcStr::from("next-minimal-server"),
                 Vc::cell(minimal_server_entries),
                 minimal_server_ignores_glob,
             )
