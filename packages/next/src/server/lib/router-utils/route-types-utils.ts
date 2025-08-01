@@ -19,6 +19,7 @@ export interface RouteTypesManifest {
   appRoutes: Record<string, RouteInfo>
   pageRoutes: Record<string, RouteInfo>
   layoutRoutes: Record<string, RouteInfo & { slots: string[] }>
+  appRouteHandlerRoutes: Record<string, RouteInfo>
   /** Map of redirect source => RouteInfo */
   redirectRoutes: Record<string, RouteInfo>
   /** Map of rewrite source => RouteInfo */
@@ -29,6 +30,8 @@ export interface RouteTypesManifest {
   layoutPaths: Set<string>
   appRouteHandlers: Set<string>
   pageApiRoutes: Set<string>
+  /** Direct mapping from file paths to routes for validation */
+  filePathToRoute: Map<string, string>
 }
 
 // Convert a custom-route source string (`/blog/:slug`, `/docs/:path*`, ...)
@@ -103,6 +106,36 @@ function isCanonicalRoute(route: string) {
 }
 
 /**
+ * Resolves an intercepting route to its canonical equivalent
+ * Example: /gallery/test/(..)photo/[id] -> /gallery/photo/[id]
+ */
+function resolveInterceptingRoute(route: string): string {
+  const segments = route.split('/').filter(Boolean)
+  const resolved: string[] = []
+
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i]
+
+    if (segment.startsWith('(.)')) {
+      // Same level intercept - replace with the intercepted route
+      resolved.push(segment.slice(3))
+    } else if (segment.startsWith('(..)')) {
+      // Parent level intercept - go up one level and add intercepted route
+      resolved.pop() // Remove the current level
+      resolved.push(segment.slice(4))
+    } else if (segment.startsWith('(...)')) {
+      // Root level intercept - clear path and add intercepted route
+      resolved.length = 0
+      resolved.push(segment.slice(5))
+    } else {
+      resolved.push(segment)
+    }
+  }
+
+  return '/' + resolved.join('/')
+}
+
+/**
  * Creates a route types manifest from processed route data
  * (used for both build and dev)
  */
@@ -131,6 +164,7 @@ export async function createRouteTypesManifest({
     appRoutes: {},
     pageRoutes: {},
     layoutRoutes: {},
+    appRouteHandlerRoutes: {},
     redirectRoutes: {},
     rewriteRoutes: {},
     appRouteHandlers: new Set(appRouteHandlers.map(({ filePath }) => filePath)),
@@ -138,6 +172,26 @@ export async function createRouteTypesManifest({
     appPagePaths: new Set(appRoutes.map(({ filePath }) => filePath)),
     pagesRouterPagePaths: new Set(pageRoutes.map(({ filePath }) => filePath)),
     layoutPaths: new Set(layoutRoutes.map(({ filePath }) => filePath)),
+    filePathToRoute: new Map([
+      ...appRoutes.map(
+        ({ route, filePath }) =>
+          [filePath, resolveInterceptingRoute(route)] as [string, string]
+      ),
+      ...layoutRoutes.map(
+        ({ route, filePath }) =>
+          [filePath, resolveInterceptingRoute(route)] as [string, string]
+      ),
+      ...appRouteHandlers.map(
+        ({ route, filePath }) =>
+          [filePath, resolveInterceptingRoute(route)] as [string, string]
+      ),
+      ...pageRoutes.map(
+        ({ route, filePath }) => [filePath, route] as [string, string]
+      ),
+      ...pageApiRoutes.map(
+        ({ route, filePath }) => [filePath, route] as [string, string]
+      ),
+    ]),
   }
 
   // Process page routes
@@ -171,6 +225,16 @@ export async function createRouteTypesManifest({
     if (!isCanonicalRoute(route)) continue
 
     manifest.appRoutes[route] = {
+      path: path.relative(dir, filePath),
+      groups: extractRouteParams(route),
+    }
+  }
+
+  // Process app route handlers
+  for (const { route, filePath } of appRouteHandlers) {
+    if (!isCanonicalRoute(route)) continue
+
+    manifest.appRouteHandlerRoutes[route] = {
       path: path.relative(dir, filePath),
       groups: extractRouteParams(route),
     }

@@ -220,6 +220,7 @@ async function startWatcher(
       appRoutes: {},
       pageRoutes: {},
       layoutRoutes: {},
+      appRouteHandlerRoutes: {},
       redirectRoutes: {},
       rewriteRoutes: {},
       appPagePaths: new Set(),
@@ -227,6 +228,7 @@ async function startWatcher(
       layoutPaths: new Set(),
       appRouteHandlers: new Set(),
       pageApiRoutes: new Set(),
+      filePathToRoute: new Map(),
     },
     path.join(distTypesDir, 'routes.d.ts')
   )
