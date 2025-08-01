@@ -28,8 +28,34 @@ jobs:
         run: |
           git remote add upstream https://github.com/vercel/next.js.git
           git fetch upstream
-          git checkout -B canary upstream/canary
-          git push origin canary --force
+          # Check if local canary exists and save any local changes
+          if git rev-parse --verify canary &>/dev/null; then
+            echo "Local canary branch exists, preserving any custom commits..."
+            git checkout canary
+            # Create a backup branch in case anything goes wrong
+            git branch -f canary-backup
+            
+            # Try to rebase our canary on top of upstream
+            if ! git rebase upstream/canary; then
+              echo "⚠️ Rebase conflicts detected, attempting merge..."
+              git rebase --abort
+              # Try merge approach
+              if ! git merge --no-ff upstream/canary -m "Sync with upstream canary"; then
+                echo "⚠️ Merge conflicts detected, using upstream version but saving backup"
+                git merge --abort
+                git checkout -B canary upstream/canary
+              fi
+            fi
+          else
+            # No local branch, just create it
+            git checkout -B canary upstream/canary
+          fi
+          
+          # Push canary, falling back to force push if needed
+          if ! git push origin canary; then
+            echo "⚠️ Regular push failed, using force push"
+            git push origin canary --force
+          }
 
   mirror-prs:
     name: Mirror and Sync PRs
@@ -90,10 +116,41 @@ jobs:
             continue
           }
 
-          # Push the branch to your fork
-          git push origin "$pr_branch" --force || {
-            echo "❌ Failed to push $pr_branch to origin"
-            continue
+          # Check if the branch exists in origin
+          if git ls-remote origin | grep -q "refs/heads/$pr_branch"; then
+            # Branch exists, create a merge commit to preserve history
+            git checkout "$pr_branch" || {
+              echo "❌ Failed to checkout $pr_branch"
+              continue
+            }
+            
+            # Create a temp branch from the fetched PR
+            git branch -f "temp-$pr_branch" HEAD
+            
+            # Try a merge-based approach
+            git fetch origin "$pr_branch"
+            git checkout -B "$pr_branch" origin/"$pr_branch"
+            git merge --no-ff "temp-$pr_branch" -m "Update mirror from upstream PR #$pr_num" || {
+              echo "⚠️ Merge conflict detected, using latest upstream version"
+              git reset --hard "temp-$pr_branch"
+            }
+            
+            # Clean up temp branch
+            git branch -D "temp-$pr_branch"
+            
+            # Push with regular push
+            git push origin "$pr_branch" || {
+              echo "❌ Failed to push $pr_branch to origin"
+              # Last resort: use force push if regular push fails
+              echo "⚠️ Attempting force push as fallback"
+              git push origin "$pr_branch" --force
+            }
+          else
+            # New branch, just push it
+            git push origin "$pr_branch" || {
+              echo "❌ Failed to push $pr_branch to origin"
+              continue
+            }
           }
 
           # Check if the PR has actual changes
