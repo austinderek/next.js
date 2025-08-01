@@ -187,38 +187,20 @@ export function generateValidatorFile(
 
 type PageConfig = {
   default: React.ComponentType<any>
-  config?: {}
   generateStaticParams?: () => Promise<any[]> | any[]
   generateMetadata?: (props: any, parent: any) => Promise<any> | any
   generateViewport?: (props: any, parent: any) => Promise<any> | any
   metadata?: any
   viewport?: any
-  revalidate?: number | false
-  dynamic?: 'auto' | 'force-dynamic' | 'error' | 'force-static'
-  dynamicParams?: boolean
-  fetchCache?: 'auto' | 'force-no-store' | 'only-no-store' | 'default-no-store' | 'default-cache' | 'only-cache' | 'force-cache'
-  preferredRegion?: 'auto' | 'global' | 'home' | string | string[]
-  runtime?: 'nodejs' | 'experimental-edge' | 'edge'
-  maxDuration?: number
-  experimental_ppr?: boolean
 }
 
 type LayoutConfig = {
   default: React.ComponentType<{ children: React.ReactNode }>
-  config?: {}
   generateStaticParams?: () => Promise<any[]> | any[]
   generateMetadata?: (props: any, parent: any) => Promise<any> | any
   generateViewport?: (props: any, parent: any) => Promise<any> | any
   metadata?: any
   viewport?: any
-  revalidate?: number | false
-  dynamic?: 'auto' | 'force-dynamic' | 'error' | 'force-static'
-  dynamicParams?: boolean
-  fetchCache?: 'auto' | 'force-no-store' | 'only-no-store' | 'default-no-store' | 'default-cache' | 'only-cache' | 'force-cache'
-  preferredRegion?: 'auto' | 'global' | 'home' | string | string[]
-  runtime?: 'nodejs' | 'experimental-edge' | 'edge'
-  maxDuration?: number
-  experimental_ppr?: boolean
 }
 
 type RouteHandlerConfig = {
@@ -229,14 +211,6 @@ type RouteHandlerConfig = {
   DELETE?: (request: Request, context: { params: Promise<any> }) => Promise<Response> | Response
   HEAD?: (request: Request, context: { params: Promise<any> }) => Promise<Response> | Response
   OPTIONS?: (request: Request, context: { params: Promise<any> }) => Promise<Response> | Response
-  config?: {}
-  revalidate?: number | false
-  dynamic?: 'auto' | 'force-dynamic' | 'error' | 'force-static'
-  dynamicParams?: boolean
-  fetchCache?: 'auto' | 'force-no-store' | 'only-no-store' | 'default-no-store' | 'default-cache' | 'only-cache' | 'force-cache'
-  preferredRegion?: 'auto' | 'global' | 'home' | string | string[]
-  runtime?: 'nodejs' | 'experimental-edge' | 'edge'
-  maxDuration?: number
 }
 
 type ApiRouteConfig = {
