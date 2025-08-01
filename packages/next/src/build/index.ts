@@ -191,6 +191,7 @@ import { InvariantError } from '../shared/lib/invariant-error'
 import { HTML_LIMITED_BOT_UA_RE_STRING } from '../shared/lib/router/utils/is-bot'
 import type { UseCacheTrackerKey } from './webpack/plugins/telemetry-plugin/use-cache-tracker-utils'
 import {
+  buildInversePrefetchSegmentDataRoute,
   buildPrefetchSegmentDataRoute,
   type PrefetchSegmentDataRoute,
 } from '../server/lib/router-utils/build-prefetch-segment-data-route'
@@ -401,6 +402,18 @@ export type ManifestRoute = ManifestBuiltRoute & {
   page: string
   namedRegex?: string
   routeKeys?: { [key: string]: string }
+
+  /**
+   * If true, this indicates that the route has fallback root params. This is
+   * used to simplify the route regex for matching.
+   */
+  hasFallbackRootParams?: boolean
+
+  /**
+   * The prefetch segment data routes for this route. This is used to rewrite
+   * the prefetch segment data routes (or the inverse) to the correct
+   * destination.
+   */
   prefetchSegmentDataRoutes?: PrefetchSegmentDataRoute[]
 
   /**
@@ -3172,7 +3185,12 @@ export default async function build(
                   }
                 }
 
-                if (!isAppRouteHandler && metadata?.segmentPaths) {
+                if (
+                  !isAppRouteHandler &&
+                  (metadata?.segmentPaths ||
+                    (route.fallbackRootParams &&
+                      route.fallbackRootParams.length > 0))
+                ) {
                   // If PPR isn't enabled, then we might not find the dynamic
                   // route by pathname. If that's the case, we need to find the
                   // route by page.
@@ -3185,7 +3203,7 @@ export default async function build(
                     }
                   }
 
-                  if (metadata.segmentPaths) {
+                  if (metadata?.segmentPaths) {
                     const pageSegmentPath = metadata.segmentPaths.find((item) =>
                       item.endsWith('__PAGE__')
                     )
@@ -3215,6 +3233,27 @@ export default async function build(
                     dynamicRoute.prefetchSegmentDataRoutes.push(
                       builtSegmentDataRoute
                     )
+                  }
+                  // If the route has fallback root params, and we don't have
+                  // any segment paths, we need to write the inverse prefetch
+                  // segment data route so that it can first rewrite the /_tree
+                  // request to the prefetch RSC route. We also need to set the
+                  // `hasFallbackRootParams` flag so that we can simplify the
+                  // route regex for matching.
+                  else if (
+                    route.fallbackRootParams &&
+                    route.fallbackRootParams.length > 0
+                  ) {
+                    dynamicRoute.hasFallbackRootParams = true
+                    dynamicRoute.prefetchSegmentDataRoutes = [
+                      buildInversePrefetchSegmentDataRoute(
+                        dynamicRoute.page,
+                        // We use the special segment path of `/_tree` because it's
+                        // the first one sent by the client router so it's the only
+                        // one we need to rewrite to the regular prefetch RSC route.
+                        '/_tree'
+                      ),
+                    ]
                   }
                 }
 
