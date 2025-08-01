@@ -133,21 +133,11 @@ export async function createRouteTypesManifest({
     layoutRoutes: {},
     redirectRoutes: {},
     rewriteRoutes: {},
-    appRouteHandlers: new Set(
-      appRouteHandlers.map(({ filePath }) => path.relative(dir, filePath))
-    ),
-    pageApiRoutes: new Set(
-      pageApiRoutes.map(({ filePath }) => path.relative(dir, filePath))
-    ),
-    appPagePaths: new Set(
-      appRoutes.map(({ filePath }) => path.relative(dir, filePath))
-    ),
-    pagesRouterPagePaths: new Set(
-      pageRoutes.map(({ filePath }) => path.relative(dir, filePath))
-    ),
-    layoutPaths: new Set(
-      layoutRoutes.map(({ filePath }) => path.relative(dir, filePath))
-    ),
+    appRouteHandlers: new Set(appRouteHandlers.map(({ filePath }) => filePath)),
+    pageApiRoutes: new Set(pageApiRoutes.map(({ filePath }) => filePath)),
+    appPagePaths: new Set(appRoutes.map(({ filePath }) => filePath)),
+    pagesRouterPagePaths: new Set(pageRoutes.map(({ filePath }) => filePath)),
+    layoutPaths: new Set(layoutRoutes.map(({ filePath }) => filePath)),
   }
 
   // Process page routes

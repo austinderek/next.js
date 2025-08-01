@@ -340,7 +340,7 @@ async function startWatcher(
     let previousConflictingPagePaths: Set<string> = new Set()
 
     const routeTypesFilePath = path.join(distDir, 'types', 'routes.d.ts')
-    const validatorFilePath = path.join(distDir, 'types', 'validator.d.ts')
+    const validatorFilePath = path.join(distDir, 'types', 'validator.ts')
 
     wp.on('aggregated', async () => {
       let middlewareMatchers: MiddlewareMatcher[] | undefined
@@ -573,7 +573,10 @@ async function startWatcher(
                   ''
                 )
               ),
-              filePath: fileName,
+              filePath: path.relative(
+                path.dirname(validatorFilePath),
+                fileName
+              ),
             })
           }
 
@@ -600,12 +603,18 @@ async function startWatcher(
           if (validFileMatcher.isAppRouterRoute(fileName)) {
             appRouteHandlers.push({
               route: normalizePathSep(pageName),
-              filePath: fileName,
+              filePath: path.relative(
+                path.dirname(validatorFilePath),
+                fileName
+              ),
             })
           } else {
             appRoutes.push({
               route: normalizePathSep(pageName),
-              filePath: fileName,
+              filePath: path.relative(
+                path.dirname(validatorFilePath),
+                fileName
+              ),
             })
           }
 
@@ -623,12 +632,18 @@ async function startWatcher(
           if (pageName.startsWith('/api/')) {
             pageApiRoutes.push({
               route: normalizePathSep(pageName),
-              filePath: fileName,
+              filePath: path.relative(
+                path.dirname(validatorFilePath),
+                fileName
+              ),
             })
           } else {
             pageRoutes.push({
               route: normalizePathSep(pageName),
-              filePath: fileName,
+              filePath: path.relative(
+                path.dirname(validatorFilePath),
+                fileName
+              ),
             })
           }
         }

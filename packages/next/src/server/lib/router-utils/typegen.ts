@@ -139,8 +139,6 @@ function generateLayoutSlotMap(routesManifest: RouteTypesManifest): string {
 export function generateValidatorFile(
   routesManifest: RouteTypesManifest
 ): string {
-  const basePrefix = '../..'
-
   const generateValidations = (
     paths: string[],
     type:
@@ -152,7 +150,7 @@ export function generateValidatorFile(
     paths
       .sort()
       .map((filePath) => {
-        const importPath = `${basePrefix}/${filePath.replace(/\.(tsx?|jsx?)$/, '')}`
+        const importPath = filePath.replace(/\.(tsx?|jsx?)$/, '')
         return `// Validate ${filePath}
 {
   const handler = {} as typeof import(${JSON.stringify(importPath)})

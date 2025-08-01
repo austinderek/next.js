@@ -1306,11 +1306,7 @@ export default async function build(
         .traceChild('generate-route-types')
         .traceAsyncFn(async () => {
           const routeTypesFilePath = path.join(distDir, 'types', 'routes.d.ts')
-          const validatorFilePath = path.join(
-            distDir,
-            'types',
-            'validator.d.ts'
-          )
+          const validatorFilePath = path.join(distDir, 'types', 'validator.ts')
           await mkdir(path.dirname(routeTypesFilePath), { recursive: true })
 
           const pageRoutes: Array<{ route: string; filePath: string }> = []
@@ -1324,10 +1320,18 @@ export default async function build(
 
           // Build pages routes
           for (const [route, filePath] of Object.entries(mappedPages)) {
+            const relativeFilePath = path.relative(
+              path.dirname(validatorFilePath),
+              path.join(
+                dir,
+                filePath.replace(/^private-next-pages\//, 'pages/')
+              )
+            )
+
             if (route.startsWith('/api/')) {
               pageApiRoutes.push({
                 route: normalizePathSep(route),
-                filePath: filePath.replace(/^private-next-pages\//, 'pages/'),
+                filePath: relativeFilePath,
               })
             } else {
               // Filter out _app, _error, _document
@@ -1335,7 +1339,7 @@ export default async function build(
 
               pageRoutes.push({
                 route: normalizePathSep(route),
-                filePath: filePath.replace(/^private-next-pages\//, 'pages/'),
+                filePath: relativeFilePath,
               })
             }
           }
@@ -1370,15 +1374,23 @@ export default async function build(
                 }
               }
 
+              const relativeFilePath = path.relative(
+                path.dirname(validatorFilePath),
+                path.join(
+                  dir,
+                  filePath.replace(/^private-next-app-dir\//, 'app/')
+                )
+              )
+
               if (validFileMatcher.isAppRouterRoute(filePath)) {
                 appRouteHandlers.push({
                   route: normalizeAppPath(normalizePathSep(route)),
-                  filePath: filePath.replace(/^private-next-app-dir\//, 'app/'),
+                  filePath: relativeFilePath,
                 })
               } else {
                 appRoutes.push({
                   route: normalizeAppPath(normalizePathSep(route)),
-                  filePath: filePath.replace(/^private-next-app-dir\//, 'app/'),
+                  filePath: relativeFilePath,
                 })
               }
             }
@@ -1387,6 +1399,13 @@ export default async function build(
           // Build app layouts
           if (appDir && mappedAppLayouts) {
             for (const [route, filePath] of Object.entries(mappedAppLayouts)) {
+              const relativeFilePath = path.relative(
+                path.dirname(validatorFilePath),
+                path.join(
+                  dir,
+                  filePath.replace(/^private-next-app-dir\//, 'app/')
+                )
+              )
               layoutRoutes.push({
                 route: ensureLeadingSlash(
                   normalizeAppPath(normalizePathSep(route)).replace(
@@ -1394,7 +1413,7 @@ export default async function build(
                     ''
                   )
                 ),
-                filePath: filePath.replace(/^private-next-app-dir\//, 'app/'),
+                filePath: relativeFilePath,
               })
             }
           }
