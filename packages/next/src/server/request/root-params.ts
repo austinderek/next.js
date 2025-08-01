@@ -88,6 +88,7 @@ function createPrerenderRootParams(
 
             const promise = makeHangingPromise<Params>(
               prerenderStore.renderSignal,
+              workStore.route,
               '`unstable_rootParams`'
             )
             CachedParams.set(underlyingParams, promise)
@@ -287,6 +288,7 @@ function createPrerenderRootParamPromise(
       ) {
         return makeHangingPromise<ParamValue>(
           prerenderStore.renderSignal,
+          workStore.route,
           apiName
         )
       }
