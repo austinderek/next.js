@@ -296,6 +296,10 @@ function getOrInstantiateModuleFromParent(
   const module = moduleCache[id]
 
   if (module) {
+    if (module.error) {
+      throw module.error
+    }
+
     return module
   }
 

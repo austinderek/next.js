@@ -115,7 +115,7 @@ function factoryNotAvailable(
   moduleId: ModuleId,
   sourceType: SourceType,
   sourceData: SourceData
-) {
+): never {
   let instantiationReason
   switch (sourceType) {
     case SourceType.Runtime:

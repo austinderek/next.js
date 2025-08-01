@@ -11,7 +11,7 @@ throw new Error("An error occurred while generating the chunk item [project]/tur
 "[project]/turbopack/crates/turbopack-tests/tests/snapshot/imports/json/input/index.js [test] (ecmascript)": ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s({});
+__turbopack_context__.s([]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$turbopack$2f$crates$2f$turbopack$2d$tests$2f$tests$2f$snapshot$2f$imports$2f$json$2f$input$2f$package$2e$json__$28$json$29$__ = __turbopack_context__.i("[project]/turbopack/crates/turbopack-tests/tests/snapshot/imports/json/input/package.json (json)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$turbopack$2f$crates$2f$turbopack$2d$tests$2f$tests$2f$snapshot$2f$imports$2f$json$2f$input$2f$invalid$2e$json__$28$json$29$__ = __turbopack_context__.i("[project]/turbopack/crates/turbopack-tests/tests/snapshot/imports/json/input/invalid.json (json)");
 ;

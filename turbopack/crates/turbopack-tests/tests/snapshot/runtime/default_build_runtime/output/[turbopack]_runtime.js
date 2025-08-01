@@ -36,7 +36,6 @@ function getOverwrittenModule(moduleCache, id) {
     return {
         exports: {},
         error: undefined,
-        loaded: false,
         id,
         namespaceObject: undefined,
         [REEXPORTED_OBJECTS]: undefined
@@ -51,17 +50,21 @@ function getOverwrittenModule(moduleCache, id) {
     if (toStringTag) defineProp(exports, toStringTag, {
         value: 'Module'
     });
-    for(const key in getters){
-        const item = getters[key];
-        if (Array.isArray(item)) {
-            defineProp(exports, key, {
-                get: item[0],
-                set: item[1],
+    let i = 0;
+    while(i < getters.length){
+        const propName = getters[i++];
+        // TODO(luke.sandberg): we could support raw values here, but would need a discriminator beyond 'not a function'
+        const getter = getters[i++];
+        if (typeof getters[i] === 'function') {
+            // a setter
+            defineProp(exports, propName, {
+                get: getter,
+                set: getters[i++],
                 enumerable: true
             });
         } else {
-            defineProp(exports, key, {
-                get: item,
+            defineProp(exports, propName, {
+                get: getter,
                 enumerable: true
             });
         }
@@ -71,13 +74,16 @@ function getOverwrittenModule(moduleCache, id) {
 /**
  * Makes the module an ESM with exports
  */ function esmExport(getters, id) {
-    let module = this.m;
-    let exports = this.e;
+    let module;
+    let exports;
     if (id != null) {
         module = getOverwrittenModule(this.c, id);
         exports = module.exports;
+    } else {
+        module = this.m;
+        exports = this.e;
     }
-    module.namespaceObject = module.exports;
+    module.namespaceObject = exports;
     esm(exports, getters);
 }
 contextPrototype.s = esmExport;
@@ -158,16 +164,26 @@ function createGetter(obj, key) {
  *   * `false`: will have the raw module as default export
  *   * `true`: will have the default property as default export
  */ function interopEsm(raw, ns, allowExportDefault) {
-    const getters = Object.create(null);
+    const getters = [];
+    // The index of the `default` export if any
+    let defaultLocation = -1;
     for(let current = raw; (typeof current === 'object' || typeof current === 'function') && !LEAF_PROTOTYPES.includes(current); current = getProto(current)){
         for (const key of Object.getOwnPropertyNames(current)){
-            getters[key] = createGetter(raw, key);
+            getters.push(key, createGetter(raw, key));
+            if (defaultLocation === -1 && key === 'default') {
+                defaultLocation = getters.length - 1;
+            }
         }
     }
     // this is not really correct
     // we should set the `default` getter if the imported module is a `.cjs file`
-    if (!(allowExportDefault && 'default' in getters)) {
-        getters['default'] = ()=>raw;
+    if (!(allowExportDefault && defaultLocation >= 0)) {
+        // Replace the binding with one for the namespace itself in order to preserve iteration order.
+        if (defaultLocation >= 0) {
+            getters[defaultLocation] = ()=>raw;
+        } else {
+            getters.push('default', ()=>raw);
+        }
     }
     esm(ns, getters);
     return ns;
@@ -183,7 +199,6 @@ function createNS(raw) {
 }
 function esmImport(id) {
     const module = getOrInstantiateModuleFromParent(id, this.m);
-    if (module.error) throw module.error;
     // any ES module has to have `module.namespaceObject` defined.
     if (module.namespaceObject) return module.namespaceObject;
     // only ESM can be an async module, so we don't need to worry about exports being a promise here.
@@ -204,9 +219,7 @@ typeof require === 'function' ? require : function require1() {
 };
 contextPrototype.t = runtimeRequire;
 function commonJsRequire(id) {
-    const module = getOrInstantiateModuleFromParent(id, this.m);
-    if (module.error) throw module.error;
-    return module.exports;
+    return getOrInstantiateModuleFromParent(id, this.m).exports;
 }
 contextPrototype.r = commonJsRequire;
 /**
@@ -688,6 +701,9 @@ function instantiateModule(id, sourceType, sourceData) {
 function getOrInstantiateModuleFromParent(id, sourceModule) {
     const module1 = moduleCache[id];
     if (module1) {
+        if (module1.error) {
+            throw module1.error;
+        }
         return module1;
     }
     return instantiateModule(id, 1, sourceModule.id);

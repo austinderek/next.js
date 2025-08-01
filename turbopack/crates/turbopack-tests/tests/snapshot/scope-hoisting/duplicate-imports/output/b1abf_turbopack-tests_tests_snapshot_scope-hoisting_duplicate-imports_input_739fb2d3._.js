@@ -11,7 +11,7 @@ module.exports = 'shared';
 
 // MERGED MODULE: [project]/turbopack/crates/turbopack-tests/tests/snapshot/scope-hoisting/duplicate-imports/input/index.js [test] (ecmascript)
 ;
-__turbopack_context__.s({}, "[project]/turbopack/crates/turbopack-tests/tests/snapshot/scope-hoisting/duplicate-imports/input/index.js [test] (ecmascript)");
+__turbopack_context__.s([], "[project]/turbopack/crates/turbopack-tests/tests/snapshot/scope-hoisting/duplicate-imports/input/index.js [test] (ecmascript)");
 // MERGED MODULE: [project]/turbopack/crates/turbopack-tests/tests/snapshot/scope-hoisting/duplicate-imports/input/c.js [test] (ecmascript)
 ;
 // MERGED MODULE: [project]/turbopack/crates/turbopack-tests/tests/snapshot/scope-hoisting/duplicate-imports/input/b.js [test] (ecmascript)

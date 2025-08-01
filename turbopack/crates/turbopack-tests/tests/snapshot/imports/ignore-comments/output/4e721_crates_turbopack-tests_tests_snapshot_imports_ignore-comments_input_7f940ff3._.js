@@ -22,9 +22,10 @@ __turbopack_context__.v("/static/ignore-worker.c7cb9893.cjs");}),
 "[project]/turbopack/crates/turbopack-tests/tests/snapshot/imports/ignore-comments/input/index.js [test] (ecmascript)": ((__turbopack_context__) => {
 "use strict";
 
-__turbopack_context__.s({
-    "foo": ()=>foo
-});
+__turbopack_context__.s([
+    "foo",
+    ()=>foo
+]);
 const __TURBOPACK__import$2e$meta__ = {
     get url () {
         return `file://${__turbopack_context__.P("turbopack/crates/turbopack-tests/tests/snapshot/imports/ignore-comments/input/index.js")}`;
