@@ -7,8 +7,14 @@ import type { NextConfigComplete } from '../../config-shared'
 import { isParallelRouteSegment } from '../../../shared/lib/segment'
 import { mkdir } from 'fs/promises'
 import fs from 'fs'
-import { generateRouteTypesFile, generateValidatorFile } from './typegen'
+import {
+  generateRouteTypesFile,
+  generateValidatorFile,
+  generateServerTypesFile,
+  generateCacheLifeTypesFile,
+} from './typegen'
 import { tryToParsePath } from '../../../lib/try-to-parse-path'
+import type { CacheLife } from '../../../server/use-cache/cache-life'
 
 interface RouteInfo {
   path: string
@@ -30,8 +36,12 @@ export interface RouteTypesManifest {
   layoutPaths: Set<string>
   appRouteHandlers: Set<string>
   pageApiRoutes: Set<string>
-  /** Direct mapping from file paths to routes for validation */
+  /** Direct mapping from file paths to routes for validation (resolves intercepting routes) */
   filePathToRoute: Map<string, string>
+  /** Layout parameters for root params extraction */
+  collectedRootParams?: Record<string, string[]>
+  /** Cache life configuration */
+  cacheLifeConfig?: { [profile: string]: CacheLife }
 }
 
 // Convert a custom-route source string (`/blog/:slug`, `/docs/:path*`, ...)
@@ -302,4 +312,54 @@ export async function writeValidatorFile(
   }
 
   await fs.promises.writeFile(filePath, generateValidatorFile(manifest))
+}
+
+export async function writeServerTypesFile(
+  manifest: RouteTypesManifest,
+  filePath: string
+) {
+  const dirname = path.dirname(filePath)
+
+  if (!fs.existsSync(dirname)) {
+    await mkdir(dirname, { recursive: true })
+  }
+
+  // Extract root params from collected layout params
+  if (manifest.collectedRootParams) {
+    // Since we now collect only the actual root layout, we can directly use its params
+    const allRootParams: { param: string; optional: boolean }[] = []
+
+    for (const [, params] of Object.entries(manifest.collectedRootParams)) {
+      for (const param of params) {
+        // All root layout params are required (not optional)
+        // since they define the top-level structure of the app
+        allRootParams.push({ param, optional: false })
+      }
+    }
+
+    if (allRootParams.length > 0) {
+      await fs.promises.writeFile(
+        filePath,
+        generateServerTypesFile(allRootParams)
+      )
+    }
+  }
+}
+
+export async function writeCacheLifeTypesFile(
+  manifest: RouteTypesManifest,
+  filePath: string
+) {
+  const dirname = path.dirname(filePath)
+
+  if (!fs.existsSync(dirname)) {
+    await mkdir(dirname, { recursive: true })
+  }
+
+  if (manifest.cacheLifeConfig) {
+    await fs.promises.writeFile(
+      filePath,
+      generateCacheLifeTypesFile(manifest.cacheLifeConfig)
+    )
+  }
 }
