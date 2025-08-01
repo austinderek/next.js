@@ -649,6 +649,9 @@ export function getImgProps(
         }
       : {},
     showAltText ? {} : { color: 'transparent' },
+    {
+      imageRendering: '-webkit-optimize-contrast',
+    },
     style
   )
 
