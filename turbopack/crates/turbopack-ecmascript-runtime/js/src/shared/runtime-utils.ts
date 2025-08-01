@@ -131,15 +131,16 @@ function esmExport(
   getters: Array<string | (() => unknown) | ((v: unknown) => void)>,
   id: ModuleId | undefined
 ) {
-  let module = this.m
-  let exports
+  let module: Module
+  let exports: Module['exports']
   if (id != null) {
     module = getOverwrittenModule(this.c, id)
     exports = module.exports
   } else {
+    module = this.m
     exports = this.e
   }
-  module.namespaceObject = module.exports
+  module.namespaceObject = exports
   esm(exports, getters)
 }
 contextPrototype.s = esmExport
