@@ -85,15 +85,16 @@ function getOverwrittenModule(moduleCache, id) {
 /**
  * Makes the module an ESM with exports
  */ function esmExport(getters, id) {
-    let module = this.m;
+    let module;
     let exports;
     if (id != null) {
         module = getOverwrittenModule(this.c, id);
         exports = module.exports;
     } else {
+        module = this.m;
         exports = this.e;
     }
-    module.namespaceObject = module.exports;
+    module.namespaceObject = exports;
     esm(exports, getters);
 }
 contextPrototype.s = esmExport;
