@@ -12,7 +12,7 @@ import { PanelRouter } from './menu/panel-router'
 import { PanelRouterContext, type PanelStateKind } from './menu/context'
 import { useDevOverlayContext } from '../dev-overlay.browser'
 
-export const RenderErrorContext = createContext<{
+const RenderErrorContext = createContext<{
   runtimeErrors: ReadyRuntimeError[]
   totalErrorCount: number
 }>(null!)
