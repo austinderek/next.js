@@ -51,7 +51,6 @@ import { CopyFilePlugin } from './webpack/plugins/copy-file-plugin'
 import { ClientReferenceManifestPlugin } from './webpack/plugins/flight-manifest-plugin'
 import { FlightClientEntryPlugin as NextFlightClientEntryPlugin } from './webpack/plugins/flight-client-entry-plugin'
 import { RspackFlightClientEntryPlugin } from './webpack/plugins/rspack-flight-client-entry-plugin'
-import { NextTypesPlugin } from './webpack/plugins/next-types-plugin'
 import type {
   Feature,
   SWC_TARGET_TRIPLE,
@@ -319,8 +318,6 @@ export default async function getBaseWebpackConfig(
     pagesDir,
     reactProductionProfiling = false,
     rewrites,
-    originalRewrites,
-    originalRedirects,
     runWebpackSpan,
     appDir,
     middlewareMatchers,
@@ -2142,20 +2139,6 @@ export default async function getBaseWebpackConfig(
               isEdgeServer,
               encryptionKey,
             })),
-      hasAppDir &&
-        !isClient &&
-        new NextTypesPlugin({
-          dir,
-          distDir: config.distDir,
-          appDir,
-          dev,
-          isEdgeServer,
-          pageExtensions: config.pageExtensions,
-          typedRoutes: true, // TODO: I think this does more than just enable typed routes??
-          cacheLifeConfig: config.experimental.cacheLife,
-          originalRewrites,
-          originalRedirects,
-        }),
       !dev &&
         isClient &&
         !!config.experimental.sri?.algorithm &&

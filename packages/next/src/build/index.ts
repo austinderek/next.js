@@ -223,6 +223,8 @@ import {
   createRouteTypesManifest,
   writeRouteTypesManifest,
   writeValidatorFile,
+  writeServerTypesFile,
+  writeCacheLifeTypesFile,
 } from '../server/lib/router-utils/route-types-utils'
 
 type Fallback = null | boolean | string
@@ -1344,6 +1346,34 @@ export default async function build(
             layoutRoutes = processLayoutRoutes(mappedAppLayouts, dir)
           }
 
+          // Collect layout parameters for root params extraction
+          // Find the root layout (shortest path with dynamic segments)
+          const collectedRootParams: Record<string, string[]> = {}
+
+          // Find layouts that could be root layouts (have dynamic segments)
+          const layoutsWithParams = layoutRoutes
+            .map(({ route }) => {
+              const foundParams = Array.from(
+                route.matchAll(/\[(.*?)\]/g),
+                (match) => match[1]
+              )
+              return { route, params: foundParams }
+            })
+            .filter(({ params }) => params.length > 0)
+
+          // Sort by path depth (ascending) to find the shallowest layout with params
+          layoutsWithParams.sort((a, b) => {
+            const aDepth = a.route.split('/').length
+            const bDepth = b.route.split('/').length
+            return aDepth - bDepth
+          })
+
+          // The root layout is the shallowest layout with dynamic segments
+          if (layoutsWithParams.length > 0) {
+            const rootLayout = layoutsWithParams[0]
+            collectedRootParams[rootLayout.route] = rootLayout.params
+          }
+
           const routeTypesManifest = await createRouteTypesManifest({
             dir,
             pageRoutes,
@@ -1356,12 +1386,39 @@ export default async function build(
             rewrites: config.rewrites,
           })
 
+          // Add collected root params and cache life config to manifest
+          routeTypesManifest.collectedRootParams = collectedRootParams
+          routeTypesManifest.cacheLifeConfig = config.experimental?.cacheLife
+
           await writeRouteTypesManifest(
             routeTypesManifest,
             routeTypesFilePath,
             config
           )
           await writeValidatorFile(routeTypesManifest, validatorFilePath)
+
+          // Generate server types if we have root params
+          if (Object.keys(collectedRootParams).length > 0) {
+            const serverTypesFilePath = path.join(
+              distDir,
+              'types',
+              'server.d.ts'
+            )
+            await writeServerTypesFile(routeTypesManifest, serverTypesFilePath)
+          }
+
+          // Generate cache life types if we have cache life config
+          if (config.experimental?.cacheLife) {
+            const cacheLifeTypesFilePath = path.join(
+              distDir,
+              'types',
+              'cache-life.d.ts'
+            )
+            await writeCacheLifeTypesFile(
+              routeTypesManifest,
+              cacheLifeTypesFilePath
+            )
+          }
         })
 
       // Turbopack already handles conflicting app and page routes.
