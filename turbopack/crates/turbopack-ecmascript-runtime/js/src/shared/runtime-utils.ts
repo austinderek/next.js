@@ -95,29 +95,52 @@ function createModuleObject(id: ModuleId): Module {
   }
 }
 
+type BindingTag = 0
+const BindingTag_Value = 0 as BindingTag
+
+// an arbitrary sequence of bindings as
+// - a prop name
+// - a binding tag
+// - 1 or 2 values dependending on the tag
+type EsmBindings = Array<
+  string | BindingTag | (() => unknown) | ((v: unknown) => void) | unknown
+>
+
 /**
  * Adds the getters to the exports object.
  */
-function esm(
-  exports: Exports,
-  getters: Array<string | (() => unknown) | ((v: unknown) => void)>
-) {
+function esm(exports: Exports, bindings: EsmBindings) {
   defineProp(exports, '__esModule', { value: true })
   if (toStringTag) defineProp(exports, toStringTag, { value: 'Module' })
   let i = 0
-  while (i < getters.length) {
-    const propName = getters[i++] as string
-    // TODO(luke.sandberg): we could support raw values here, but would need a discriminator beyond 'not a function'
-    const getter = getters[i++] as () => unknown
-    if (typeof getters[i] === 'function') {
-      // a setter
-      defineProp(exports, propName, {
-        get: getter,
-        set: getters[i++] as (v: unknown) => void,
-        enumerable: true,
-      })
+  while (i < bindings.length) {
+    const propName = bindings[i++] as string
+    const tagOrFunction = bindings[i++]
+    if (typeof tagOrFunction === 'number') {
+      if (tagOrFunction === BindingTag_Value) {
+        defineProp(exports, propName, {
+          value: bindings[i++],
+          enumerable: true,
+          writable: false,
+        })
+      } else {
+        throw new Error(`unexpected tag: ${tagOrFunction}`)
+      }
     } else {
-      defineProp(exports, propName, { get: getter, enumerable: true })
+      const getterFn = tagOrFunction as () => unknown
+      if (typeof bindings[i] === 'function') {
+        const setterFn = bindings[i++] as (v: unknown) => void
+        defineProp(exports, propName, {
+          get: getterFn,
+          set: setterFn,
+          enumerable: true,
+        })
+      } else {
+        defineProp(exports, propName, {
+          get: getterFn,
+          enumerable: true,
+        })
+      }
     }
   }
   Object.seal(exports)
@@ -128,7 +151,7 @@ function esm(
  */
 function esmExport(
   this: TurbopackBaseContext<Module>,
-  getters: Array<string | (() => unknown) | ((v: unknown) => void)>,
+  bindings: EsmBindings,
   id: ModuleId | undefined
 ) {
   let module: Module
@@ -141,7 +164,7 @@ function esmExport(
     exports = this.e
   }
   module.namespaceObject = exports
-  esm(exports, getters)
+  esm(exports, bindings)
 }
 contextPrototype.s = esmExport
 
@@ -186,11 +209,14 @@ function dynamicExport(
   object: Record<string, any>,
   id: ModuleId | undefined
 ) {
-  let module = this.m
-  let exports = this.e
+  let module: Module
+  let exports: Exports
   if (id != null) {
     module = getOverwrittenModule(this.c, id)
     exports = module.exports
+  } else {
+    module = this.m
+    exports = this.e
   }
   ensureDynamicExports(module, exports)
 
@@ -252,8 +278,7 @@ function interopEsm(
   ns: EsmNamespaceObject,
   allowExportDefault?: boolean
 ) {
-  const getters: Array<string | (() => unknown) | ((v: unknown) => void)> = []
-  // The index of the `default` export if any
+  const bindings: EsmBindings = []
   let defaultLocation = -1
   for (
     let current = raw;
@@ -262,9 +287,9 @@ function interopEsm(
     current = getProto(current)
   ) {
     for (const key of Object.getOwnPropertyNames(current)) {
-      getters.push(key, createGetter(raw, key))
+      bindings.push(key, createGetter(raw, key))
       if (defaultLocation === -1 && key === 'default') {
-        defaultLocation = getters.length - 1
+        defaultLocation = bindings.length - 1
       }
     }
   }
@@ -274,13 +299,14 @@ function interopEsm(
   if (!(allowExportDefault && defaultLocation >= 0)) {
     // Replace the binding with one for the namespace itself in order to preserve iteration order.
     if (defaultLocation >= 0) {
-      getters[defaultLocation] = () => raw
+      // Replace the getter with the value
+      bindings.splice(defaultLocation, 1, BindingTag_Value, raw)
     } else {
-      getters.push('default', () => raw)
+      bindings.push('default', BindingTag_Value, raw)
     }
   }
 
-  esm(ns, getters)
+  esm(ns, bindings)
   return ns
 }
 

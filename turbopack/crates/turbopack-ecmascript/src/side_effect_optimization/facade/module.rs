@@ -23,6 +23,7 @@ use crate::{
     EcmascriptModuleContentOptions, EcmascriptOptions, MergedEcmascriptModule, SpecifiedModuleType,
     chunk::{EcmascriptChunkPlaceable, EcmascriptExports},
     code_gen::CodeGens,
+    export::Liveness,
     parse::ParseResult,
     references::{
         async_module::{AsyncModule, OptionAsyncModule},
@@ -330,7 +331,7 @@ impl EcmascriptChunkPlaceable for EcmascriptModuleFacadeModule {
                     );
                 };
                 let esm_exports = esm_exports.await?;
-                if esm_exports.exports.keys().any(|name| name == "default") {
+                if let Some(default_export) = esm_exports.exports.get("default") {
                     exports.insert(
                         rcstr!("default"),
                         EsmExport::ImportedBinding(
@@ -344,7 +345,7 @@ impl EcmascriptChunkPlaceable for EcmascriptModuleFacadeModule {
                                 .await?,
                             ),
                             rcstr!("default"),
-                            false,
+                            default_export.liveness(),
                         ),
                     );
                 }
@@ -375,7 +376,7 @@ impl EcmascriptChunkPlaceable for EcmascriptModuleFacadeModule {
                             .await?,
                         ),
                         original_export.clone(),
-                        false,
+                        Liveness::Live,
                     ),
                 );
             }
