@@ -44,6 +44,7 @@ export function NextLogo({
   const width = measuredWidth === 0 ? 'auto' : measuredWidth
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/react-compiler -- TODO
     setIsErrorExpanded(hasError)
   }, [hasError])
 
