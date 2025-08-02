@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useUpdateAnimation } from './hooks/use-update-animation'
 import { useMeasureWidth } from './hooks/use-measure-width'
 import { useMinimumLoadingTimeMultiple } from './hooks/use-minimum-loading-time-multiple'
@@ -43,10 +43,9 @@ export function NextLogo({
   const isExpanded = isErrorExpanded || state.disableDevIndicator
   const width = measuredWidth === 0 ? 'auto' : measuredWidth
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/react-compiler -- TODO
+  if (hasError && !isErrorExpanded) {
     setIsErrorExpanded(hasError)
-  }, [hasError])
+  }
 
   return (
     <div
