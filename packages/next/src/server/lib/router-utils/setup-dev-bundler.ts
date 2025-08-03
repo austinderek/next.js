@@ -355,10 +355,9 @@ async function startWatcher(
       let conflictingPageChange = 0
       let hasRootAppNotFound = false
 
-      const { appFiles, pageFiles } = opts.fsChecker
+      const appFilesList: string[] = []
+      const pageFilesList: string[] = []
 
-      appFiles.clear()
-      pageFiles.clear()
       devPageFiles.clear()
 
       const sortedKnownFiles: string[] = [...knownFiles.keys()].sort(
@@ -585,7 +584,7 @@ async function startWatcher(
           )
 
           if (useFileSystemPublicRoutes) {
-            appFiles.add(pageName)
+            appFilesList.push(pageName)
           }
 
           appRoutes.push({
@@ -598,7 +597,7 @@ async function startWatcher(
           }
         } else {
           if (useFileSystemPublicRoutes) {
-            pageFiles.add(pageName)
+            pageFilesList.push(pageName)
             // always add to nextDataRoutes for now but in future only add
             // entries that actually use getStaticProps/getServerSideProps
             opts.fsChecker.nextDataRoutes.add(pageName)
@@ -634,6 +633,12 @@ async function startWatcher(
 
         routedPages.push(pageName)
       }
+
+      const { appFiles, pageFiles } = opts.fsChecker
+      appFiles.clear()
+      pageFiles.clear()
+      appFilesList.forEach((pageName) => appFiles.add(pageName))
+      pageFilesList.forEach((pageName) => pageFiles.add(pageName))
 
       const numConflicting = conflictingAppPagePaths.size
       conflictingPageChange = numConflicting - previousConflictingPagePaths.size
