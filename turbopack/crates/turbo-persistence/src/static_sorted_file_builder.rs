@@ -163,6 +163,11 @@ fn compute_key_compression_dictionary<E: Entry>(
         return Ok(Vec::new());
     }
 
+    let max_sample_size = max(
+        MIN_COMPRESSION_DICTIONARY_SAMPLE_PER_ENTRY,
+        key_compression_samples_size / 1024,
+    );
+
     let mut sample_sizes = Vec::new();
 
     for entry in entries {
@@ -172,7 +177,8 @@ fn compute_key_compression_dictionary<E: Entry>(
         }
         let len = entry.key_len();
         if len >= MIN_COMPRESSION_DICTIONARY_SAMPLE_PER_ENTRY {
-            let optimal_len = max(MIN_COMPRESSION_DICTIONARY_SAMPLE_PER_ENTRY, len / 8);
+            let optimal_len =
+                (len / 8).clamp(MIN_COMPRESSION_DICTIONARY_SAMPLE_PER_ENTRY, max_sample_size);
             let used_len = min(key_remaining, optimal_len);
             if len <= used_len {
                 sample_sizes.push(len);
@@ -188,10 +194,12 @@ fn compute_key_compression_dictionary<E: Entry>(
             }
         }
     }
-    debug_assert!(buffer.len() == sample_sizes.iter().sum::<usize>());
-    let result = if buffer.len() > MIN_KEY_COMPRESSION_SAMPLES_SIZE && sample_sizes.len() > 5 {
-        zstd::dict::from_continuous(buffer, &sample_sizes, KEY_COMPRESSION_DICTIONARY_SIZE)
-            .context("Key dictionary creation failed")?
+    /// The zlib dict builder requires at least 7 samples
+    const MIN_SAMPLE_SIZE: usize = 7;
+    let result = if buffer.len() > MIN_KEY_COMPRESSION_SAMPLES_SIZE
+        && sample_sizes.len() > MIN_SAMPLE_SIZE
+    {
+        zstd::dict::from_continuous(buffer, &sample_sizes, KEY_COMPRESSION_DICTIONARY_SIZE)?
     } else {
         Vec::new()
     };
