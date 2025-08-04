@@ -902,8 +902,6 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
                                         amqf,
                                         key_compression_dictionary_length: entry
                                             .key_compression_dictionary_length(),
-                                        value_compression_dictionary_length: entry
-                                            .value_compression_dictionary_length(),
                                         block_count: entry.block_count(),
                                         size: entry.size(),
                                         entries: 0,
@@ -918,7 +916,6 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
                                     parallel_scheduler: &S,
                                     entries: &[LookupEntry<'l>],
                                     total_key_size: usize,
-                                    total_value_size: usize,
                                     path: &Path,
                                     seq: u32,
                                 ) -> Result<(u32, File, StaticSortedFileBuilderMeta<'static>)>
@@ -929,7 +926,6 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
                                         write_static_stored_file(
                                             entries,
                                             total_key_size,
-                                            total_value_size,
                                             &path.join(format!("{seq:08}.sst")),
                                         )
                                     })?;
@@ -964,7 +960,7 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
                                 let mut current: Option<LookupEntry<'_>> = None;
                                 let mut entries = Vec::new();
                                 let mut last_entries = Vec::new();
-                                let mut last_entries_total_sizes = (0, 0);
+                                let mut last_entries_total_key_size = 0;
                                 for entry in iter {
                                     let entry = entry?;
 
@@ -981,15 +977,11 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
                                                 > DATA_THRESHOLD_PER_COMPACTED_FILE
                                                 || entries.len() >= MAX_ENTRIES_PER_COMPACTED_FILE
                                             {
-                                                let (
-                                                    selected_total_key_size,
-                                                    selected_total_value_size,
-                                                ) = last_entries_total_sizes;
+                                                let selected_total_key_size =
+                                                    last_entries_total_key_size;
                                                 swap(&mut entries, &mut last_entries);
-                                                last_entries_total_sizes = (
-                                                    total_key_size - key_size,
-                                                    total_value_size - value_size,
-                                                );
+                                                last_entries_total_key_size =
+                                                    total_key_size - key_size;
                                                 total_key_size = key_size;
                                                 total_value_size = value_size;
 
@@ -1003,7 +995,6 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
                                                         &self.parallel_scheduler,
                                                         &entries,
                                                         selected_total_key_size,
-                                                        selected_total_value_size,
                                                         path,
                                                         seq,
                                                     )?);
@@ -1021,7 +1012,8 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
                                 }
                                 if let Some(entry) = current {
                                     total_key_size += entry.key.len();
-                                    total_value_size += entry.value.uncompressed_size_in_sst();
+                                    // Obsolete as we no longer need total_value_size
+                                    // total_value_size += entry.value.uncompressed_size_in_sst();
                                     entries.push(entry);
                                 }
 
@@ -1034,7 +1026,6 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
                                         &self.parallel_scheduler,
                                         &entries,
                                         total_key_size,
-                                        total_value_size,
                                         path,
                                         seq,
                                     )?);
@@ -1045,8 +1036,7 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
                                 if !last_entries.is_empty() {
                                     last_entries.append(&mut entries);
 
-                                    last_entries_total_sizes.0 += total_key_size;
-                                    last_entries_total_sizes.1 += total_value_size;
+                                    last_entries_total_key_size += total_key_size;
 
                                     let (part1, part2) =
                                         last_entries.split_at(last_entries.len() / 2);
@@ -1059,8 +1049,7 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
                                         &self.parallel_scheduler,
                                         part1,
                                         // We don't know the exact sizes so we estimate them
-                                        last_entries_total_sizes.0 / 2,
-                                        last_entries_total_sizes.1 / 2,
+                                        last_entries_total_key_size / 2,
                                         path,
                                         seq1,
                                     )?);
@@ -1069,8 +1058,7 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
                                     new_sst_files.push(create_sst_file(
                                         &self.parallel_scheduler,
                                         part2,
-                                        last_entries_total_sizes.0 / 2,
-                                        last_entries_total_sizes.1 / 2,
+                                        last_entries_total_key_size / 2,
                                         path,
                                         seq2,
                                     )?);
@@ -1271,8 +1259,6 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
                             amqf_entries: amqf.len(),
                             key_compression_dictionary_size: entry
                                 .key_compression_dictionary_length(),
-                            value_compression_dictionary_size: entry
-                                .value_compression_dictionary_length(),
                             block_count: entry.block_count(),
                         }
                     })
@@ -1310,6 +1296,5 @@ pub struct MetaFileEntryInfo {
     pub amqf_entries: usize,
     pub sst_size: u64,
     pub key_compression_dictionary_size: u16,
-    pub value_compression_dictionary_size: u16,
     pub block_count: u16,
 }
