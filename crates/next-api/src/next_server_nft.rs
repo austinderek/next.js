@@ -1,7 +1,9 @@
+use std::collections::BTreeSet;
+
 use anyhow::{Context, Result, bail};
 use either::Either;
 use next_core::{get_next_package, next_server::get_tracing_compile_time_info};
-use serde_json::json;
+use serde_json::{Value, json};
 use tracing::{Instrument, Level, instrument};
 use turbo_rcstr::RcStr;
 use turbo_tasks::{ResolvedVc, TryFlatJoinIterExt, TryJoinIterExt, Vc};
@@ -37,7 +39,10 @@ pub async fn next_server_nft_assets(project: Vc<Project>) -> Result<Vc<OutputAss
     let is_standalone = *project.next_config().is_standalone().await?;
     let has_next_support = *project.next_config().ci_has_next_support().await?;
 
-    let asset_context = Vc::upcast(externals_tracing_module_context(ExternalType::CommonJs, get_tracing_compile_time_info()));
+    let asset_context = Vc::upcast(externals_tracing_module_context(
+        ExternalType::CommonJs,
+        get_tracing_compile_time_info(),
+    ));
 
     let next_resolve_origin = Vc::upcast(PlainResolveOrigin::new(
         asset_context,
@@ -120,6 +125,27 @@ pub async fn next_server_nft_assets(project: Vc<Project>) -> Result<Vc<OutputAss
         .try_join()
         .await?;
 
+    let output_file_tracing_excludes = project.next_config().output_file_tracing_excludes().await?;
+    let mut additional_ignores = BTreeSet::new();
+    if let Some(output_file_tracing_excludes) = output_file_tracing_excludes
+        .as_ref()
+        .and_then(Value::as_object)
+    {
+        for (glob_pattern, exclude_patterns) in output_file_tracing_excludes {
+            // Check if the route matches the glob pattern
+            let glob = Glob::new(RcStr::from(glob_pattern.clone())).await?;
+            if glob.matches("next-server")
+                && let Some(patterns) = exclude_patterns.as_array()
+            {
+                for pattern in patterns {
+                    if let Some(pattern_str) = pattern.as_str() {
+                        additional_ignores.insert(pattern_str);
+                    }
+                }
+            }
+        }
+    }
+
     let server_ignores_glob = [
         "**/node_modules/react{,-dom,-dom-server-turbopack}/**/*.development.js",
         "**/*.d.ts",
@@ -130,20 +156,26 @@ pub async fn next_server_nft_assets(project: Vc<Project>) -> Result<Vc<OutputAss
         "**/node_modules/webpack5/**/*",
         "**/next/dist/server/lib/route-resolver*",
         "**/next/dist/compiled/semver/semver/**/*.js",
-        // ...additionalIgnores,
         // Turbopack doesn't support AMP
         "**/next/dist/compiled/@ampproject/toolbox-optimizer/**/*",
-        // The following were added for Turbopack
+        // -- The following were added for Turbopack --
+        // client/components/use-action-queue.ts has a process.env.NODE_ENV guard, but we can't set that due to React: https://github.com/vercel/next.js/pull/75254
+        "**/next/dist/next-devtools/userspace/use-app-dev-rendering-indicator.js",
+        // client/components/app-router.js has a process.env.NODE_ENV guard, but we can't set that.
+        "**/next/dist/client/dev/hot-reloader/app/hot-reloader-app.js",
+        // server/lib/router-server.js doesn't guard this require:
         "**/next/dist/server/lib/router-utils/setup-dev-bundler.js",
-        "**/next/dist/server/dev/**",
-        "**/next/dist/client/dev/**",
-        "**/next/dist/build/swc/index.js",
-        "**/next/dist/next-devtools/**",
-        "**/next/dist/cli/next-test.js",
+        // server/next.js doesn't guard this require:
+        "**/next/dist/server/dev/next-dev-server.js",
+        // "**/next/dist/server/dev/**",
+        // "**/next/dist/client/dev/**",
+        // "**/next/dist/build/swc/index.js",
+        // "**/next/dist/cli/next-test.js",
         // TODO verify?
         "**/next/dist/compiled/browserslist/**",
     ]
     .into_iter()
+    .chain(additional_ignores)
     .chain(
         if has_next_support {
             Some(["**/node_modules/sharp/**/*", "**/@img/sharp-libvips*/**/*"]).into_iter()
