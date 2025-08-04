@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    cmp::min,
+    cmp::{max, min},
     fs::File,
     io::{BufWriter, Seek, Write},
     path::Path,
@@ -38,8 +38,6 @@ const KEY_COMPRESSION_SAMPLES_SIZE: usize = 256 * 1024;
 /// The minimum bytes that should be selected as key samples. Below that no compression dictionary
 /// is used.
 const MIN_KEY_COMPRESSION_SAMPLES_SIZE: usize = 1024;
-/// The bytes that are used per key/value entry for a sample.
-const COMPRESSION_DICTIONARY_SAMPLE_PER_ENTRY: usize = 100;
 /// The minimum bytes that are used per key/value entry for a sample.
 const MIN_COMPRESSION_DICTIONARY_SAMPLE_PER_ENTRY: usize = 16;
 
@@ -167,17 +165,15 @@ fn compute_key_compression_dictionary<E: Entry>(
 
     let mut sample_sizes = Vec::new();
 
-    // Limit the number of iterations to avoid infinite loops
-    let max_iterations = total_key_size / COMPRESSION_DICTIONARY_SAMPLE_PER_ENTRY * 2;
-    for i in 0..max_iterations {
-        let entry = &entries[i % entries.len()];
+    for entry in entries {
         let key_remaining = key_compression_samples_size - buffer.len();
         if key_remaining < MIN_COMPRESSION_DICTIONARY_SAMPLE_PER_ENTRY {
             break;
         }
         let len = entry.key_len();
         if len >= MIN_COMPRESSION_DICTIONARY_SAMPLE_PER_ENTRY {
-            let used_len = min(key_remaining, COMPRESSION_DICTIONARY_SAMPLE_PER_ENTRY);
+            let optimal_len = max(MIN_COMPRESSION_DICTIONARY_SAMPLE_PER_ENTRY, len / 8);
+            let used_len = min(key_remaining, optimal_len);
             if len <= used_len {
                 sample_sizes.push(len);
                 entry.write_key_to(buffer);
