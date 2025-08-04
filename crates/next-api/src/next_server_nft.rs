@@ -1,0 +1,346 @@
+use anyhow::{Context, Result, bail};
+use either::Either;
+use next_core::{get_next_package, next_server::get_tracing_compile_time_info};
+use serde_json::json;
+use tracing::{Instrument, Level, instrument};
+use turbo_rcstr::RcStr;
+use turbo_tasks::{ResolvedVc, TryFlatJoinIterExt, TryJoinIterExt, Vc};
+use turbo_tasks_fs::{DirectoryContent, DirectoryEntry, File, FileSystemPath, glob::Glob};
+use turbopack::externals_tracing_module_context;
+use turbopack_core::{
+    asset::{Asset, AssetContent},
+    module::Module,
+    output::{OutputAsset, OutputAssets},
+    resolve::{ExternalType, origin::PlainResolveOrigin, parse::Request},
+    traced_asset::TracedAsset,
+};
+use turbopack_ecmascript::resolve::cjs_resolve;
+
+use crate::{nft_json::all_assets_from_entries_filtered, project::Project};
+
+// TODO hardcode these for the page-specific NFTs
+//   const routesIgnores = [
+//     ...sharedIgnores,
+//     // server chunks are provided via next-trace-entrypoints-plugin plugin
+//     // as otherwise all chunks are traced here and included for all pages
+//     // whether they are needed or not
+//     '**/.next/server/chunks/**',
+//     '**/next/dist/server/optimize-amp.js',
+//     '**/next/dist/server/post-process.js',
+//   ].filter(nonNullable)
+
+// TODO snapshot test for next-minimal-server ?
+
+#[instrument(level = Level::INFO, skip_all)]
+#[turbo_tasks::function]
+pub async fn next_server_nft_assets(project: Vc<Project>) -> Result<Vc<OutputAssets>> {
+    let is_standalone = *project.next_config().is_standalone().await?;
+    let has_next_support = *project.next_config().ci_has_next_support().await?;
+
+    let asset_context = Vc::upcast(externals_tracing_module_context(ExternalType::CommonJs, get_tracing_compile_time_info()));
+
+    let next_resolve_origin = Vc::upcast(PlainResolveOrigin::new(
+        asset_context,
+        get_next_package(project.project_path().owned().await?)
+            .await?
+            .join("_")?,
+    ));
+
+    let resolve_entry = async |path: &str| {
+        Ok(cjs_resolve(
+            next_resolve_origin,
+            Request::parse_string(path.into()),
+            None,
+            false,
+        )
+        .primary_modules()
+        .await?
+        .into_iter()
+        .map(|m| **m))
+    };
+
+    let shared_entries: Vec<Vc<Box<dyn Module>>> =
+        ["styled-jsx", "styled-jsx/style", "styled-jsx/style.js"]
+            .into_iter()
+            .map(resolve_entry)
+            .try_flat_join()
+            .await?;
+
+    // TODO
+    //   const { cacheHandler } = config
+    //   const { cacheHandlers } = config.experimental
+    //   // ensure we trace any dependencies needed for custom
+    //   // incremental cache handler
+    //   if (cacheHandler) {
+    //     sharedEntriesSet.push(
+    //       require.resolve(
+    //         path.isAbsolute(cacheHandler)
+    //           ? cacheHandler
+    //           : path.join(dir, cacheHandler)
+    //       )
+    //     )
+    //   }
+    //   if (cacheHandlers) {
+    //     for (const handlerPath of Object.values(cacheHandlers)) {
+    //       if (handlerPath) {
+    //         sharedEntriesSet.push(
+    //           require.resolve(
+    //             path.isAbsolute(handlerPath)
+    //               ? handlerPath
+    //               : path.join(dir, handlerPath)
+    //           )
+    //         )
+    //       }
+    //     }
+    //   }
+
+    let server_entries = shared_entries
+        .iter()
+        .copied()
+        .chain(if is_standalone {
+            Either::Left(
+                resolve_entry("next/dist/server/lib/start-server")
+                    .await?
+                    .chain(resolve_entry("next/dist/server/next").await?)
+                    .chain(resolve_entry("next/dist/server/require-hook").await?),
+            )
+        } else {
+            Either::Right(std::iter::empty())
+        })
+        .chain(resolve_entry("next/dist/server/next-server").await?)
+        .map(|m| Vc::upcast::<Box<dyn OutputAsset>>(TracedAsset::new(m)).to_resolved())
+        .try_join()
+        .await?;
+
+    let minimal_server_entries = shared_entries
+        .iter()
+        .copied()
+        .chain(resolve_entry("next/dist/compiled/next-server/server.runtime.prod").await?)
+        .map(|m| Vc::upcast::<Box<dyn OutputAsset>>(TracedAsset::new(m)).to_resolved())
+        .try_join()
+        .await?;
+
+    let server_ignores_glob = [
+        "**/node_modules/react{,-dom,-dom-server-turbopack}/**/*.development.js",
+        "**/*.d.ts",
+        "**/*.map",
+        "**/next/dist/pages/**/*",
+        "**/next/dist/compiled/next-server/**/*.dev.js",
+        "**/next/dist/compiled/webpack/*",
+        "**/node_modules/webpack5/**/*",
+        "**/next/dist/server/lib/route-resolver*",
+        "**/next/dist/compiled/semver/semver/**/*.js",
+        // ...additionalIgnores,
+        // Turbopack doesn't support AMP
+        "**/next/dist/compiled/@ampproject/toolbox-optimizer/**/*",
+        // The following were added for Turbopack
+        "**/next/dist/server/lib/router-utils/setup-dev-bundler.js",
+        "**/next/dist/server/dev/**",
+        "**/next/dist/client/dev/**",
+        "**/next/dist/build/swc/index.js",
+        "**/next/dist/next-devtools/**",
+        "**/next/dist/cli/next-test.js",
+        // TODO verify?
+        "**/next/dist/compiled/browserslist/**",
+    ]
+    .into_iter()
+    .chain(
+        if has_next_support {
+            Some(["**/node_modules/sharp/**/*", "**/@img/sharp-libvips*/**/*"]).into_iter()
+        } else {
+            None.into_iter()
+        }
+        .flatten(),
+    )
+    .chain(if has_next_support {
+        // only ignore image-optimizer code when
+        // this is being handled outside of next-server
+        Some("**/next/dist/server/image-optimizer.js").into_iter()
+    } else {
+        None.into_iter()
+    })
+    .chain(
+        if is_standalone {
+            None.into_iter()
+        } else {
+            Some([
+                "**/next/dist/compiled/jest-worker/**/*",
+                "**/*/next/dist/server/next.js",
+                "**/*/next/dist/bin/next",
+            ])
+            .into_iter()
+        }
+        .flatten(),
+    )
+    .map(|g| Glob::new(g.into()))
+    .collect::<Vec<_>>();
+
+    let minimal_server_ignores_glob = Glob::alternatives(
+        server_ignores_glob
+            .iter()
+            .copied()
+            .chain(
+                [
+                    "**/next/dist/compiled/edge-runtime/**/*",
+                    "**/next/dist/server/web/sandbox/**/*",
+                    "**/next/dist/server/post-process.js",
+                ]
+                .into_iter()
+                .map(|g| Glob::new(g.into())),
+            )
+            .collect(),
+    );
+
+    Ok(Vc::cell(vec![
+        ResolvedVc::upcast(
+            ServerNftJsonAsset::new(
+                project,
+                RcStr::from("next-server.turbo"),
+                Vc::cell(server_entries),
+                Glob::alternatives(server_ignores_glob),
+            )
+            .to_resolved()
+            .await?,
+        ),
+        ResolvedVc::upcast(
+            ServerNftJsonAsset::new(
+                project,
+                RcStr::from("next-minimal-server.turbo"),
+                Vc::cell(minimal_server_entries),
+                minimal_server_ignores_glob,
+            )
+            .to_resolved()
+            .await?,
+        ),
+    ]))
+}
+
+#[turbo_tasks::value]
+pub struct ServerNftJsonAsset {
+    project: ResolvedVc<Project>,
+    name: RcStr,
+    entries: ResolvedVc<OutputAssets>,
+    ignores: ResolvedVc<Glob>,
+}
+
+#[turbo_tasks::value_impl]
+impl ServerNftJsonAsset {
+    #[turbo_tasks::function]
+    pub fn new(
+        project: ResolvedVc<Project>,
+        name: RcStr,
+        entries: ResolvedVc<OutputAssets>,
+        ignores: ResolvedVc<Glob>,
+    ) -> Vc<Self> {
+        ServerNftJsonAsset {
+            project,
+            name,
+            entries,
+            ignores,
+        }
+        .cell()
+    }
+}
+
+#[turbo_tasks::value_impl]
+impl OutputAsset for ServerNftJsonAsset {
+    #[turbo_tasks::function]
+    async fn path(&self) -> Result<Vc<FileSystemPath>> {
+        Ok(self
+            .project
+            .node_root()
+            .await?
+            .join(&format!("{}.js.nft.json", self.name))?
+            .cell())
+    }
+}
+
+#[turbo_tasks::value_impl]
+impl Asset for ServerNftJsonAsset {
+    #[turbo_tasks::function]
+    async fn content(&self) -> Result<Vc<AssetContent>> {
+        let span = tracing::info_span!("next server nft json", name = display(&self.name));
+        async move {
+            // Example: [project]/apps/my-website/.next/
+            let base_dir = self
+                .project
+                .project_root_path()
+                .await?
+                .join(&self.project.node_root().await?.path)?;
+
+            let mut server_output_assets =
+                all_assets_from_entries_filtered(*self.entries, None, Some(*self.ignores))
+                    .await?
+                    .iter()
+                    .map(async |m| {
+                        base_dir
+                            .get_relative_path_to(&*m.path().await?)
+                            .context("failed to compute relative path for server nft.json")
+                    })
+                    .try_join()
+                    .await?;
+            server_output_assets.sort();
+
+            // if is_standalone && !is_minimal {
+            //     server_output_assets.extend(
+            //         resolve_entry("next/dist/compiled/jest-worker/processChild")
+            //             .await?
+            //             .map(|m| m.ident().path())
+            //             .try_join()
+            //             .await?,
+            //     );
+            //     server_output_assets.extend(
+            //         resolve_entry("next/dist/compiled/jest-worker/threadChild")
+            //             .await?
+            //             .map(|m| m.ident().path())
+            //             .try_join()
+            //             .await?,
+            //     );
+            // }
+
+            // A few hardcoded files (not recursive)
+            server_output_assets.push("./package.json".into());
+
+            let next_dir = get_next_package(self.project.project_path().owned().await?).await?;
+            for ty in ["app-page", "pages"] {
+                let dir = next_dir.join(&format!("dist/server/route-modules/{ty}"))?;
+                let module_path = dir.join("module.compiled.js")?;
+                server_output_assets.push(
+                    base_dir
+                        .get_relative_path_to(&module_path)
+                        .context("failed to compute relative path for server nft.json")?,
+                );
+
+                let contexts_dir = dir.join("vendored/contexts")?;
+                let DirectoryContent::Entries(contexts_files) = &*contexts_dir.read_dir().await?
+                else {
+                    bail!(
+                        "Expected contexts directory to be a directory, found: {:?}",
+                        contexts_dir
+                    );
+                };
+                for (_, entry) in contexts_files {
+                    let DirectoryEntry::File(file) = entry else {
+                        continue;
+                    };
+                    if file.extension() == "js" {
+                        server_output_assets.push(
+                            base_dir
+                                .get_relative_path_to(file)
+                                .context("failed to compute relative path for server nft.json")?,
+                        )
+                    }
+                }
+            }
+
+            let json = json!({
+              "version": 1,
+              "files": server_output_assets
+            });
+
+            Ok(AssetContent::file(File::from(json.to_string()).into()))
+        }
+        .instrument(span)
+        .await
+    }
+}
