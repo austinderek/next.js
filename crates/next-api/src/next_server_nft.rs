@@ -147,7 +147,7 @@ pub async fn next_server_nft_assets(project: Vc<Project>) -> Result<Vc<OutputAss
     }
 
     let server_ignores_glob = [
-        "**/node_modules/react{,-dom,-dom-server-turbopack}/**/*.development.js",
+        "**/node_modules/react{,-dom,-server-dom-turbopack}/**/*.development.js",
         "**/*.d.ts",
         "**/*.map",
         "**/next/dist/pages/**/*",
