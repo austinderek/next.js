@@ -11,8 +11,11 @@ use turbo_tasks_fs::{DirectoryContent, DirectoryEntry, File, FileSystemPath, glo
 use turbopack::externals_tracing_module_context;
 use turbopack_core::{
     asset::{Asset, AssetContent},
+    context::AssetContext,
+    file_source::FileSource,
     module::Module,
     output::{OutputAsset, OutputAssets},
+    reference_type::{CommonJsReferenceSubType, ReferenceType},
     resolve::{ExternalType, origin::PlainResolveOrigin, parse::Request},
     traced_asset::TracedAsset,
 };
@@ -44,11 +47,11 @@ pub async fn next_server_nft_assets(project: Vc<Project>) -> Result<Vc<OutputAss
         get_tracing_compile_time_info(),
     ));
 
+    let project_path = project.project_path().owned().await?;
+
     let next_resolve_origin = Vc::upcast(PlainResolveOrigin::new(
         asset_context,
-        get_next_package(project.project_path().owned().await?)
-            .await?
-            .join("_")?,
+        get_next_package(project_path.clone()).await?.join("_")?,
     ));
 
     let resolve_entry = async |path: &str| {
@@ -64,6 +67,16 @@ pub async fn next_server_nft_assets(project: Vc<Project>) -> Result<Vc<OutputAss
         .map(|m| **m))
     };
 
+    let cache_handler = project
+        .next_config()
+        .cache_handler(project_path.clone())
+        .await?;
+    let cache_handlers = project
+        .next_config()
+        .experimental_cache_handlers(project_path.clone())
+        .await?;
+
+    // These are used by packages/next/src/server/require-hook.ts
     let shared_entries: Vec<Vc<Box<dyn Module>>> =
         ["styled-jsx", "styled-jsx/style", "styled-jsx/style.js"]
             .into_iter()
@@ -71,36 +84,22 @@ pub async fn next_server_nft_assets(project: Vc<Project>) -> Result<Vc<OutputAss
             .try_flat_join()
             .await?;
 
-    // TODO
-    //   const { cacheHandler } = config
-    //   const { cacheHandlers } = config.experimental
-    //   // ensure we trace any dependencies needed for custom
-    //   // incremental cache handler
-    //   if (cacheHandler) {
-    //     sharedEntriesSet.push(
-    //       require.resolve(
-    //         path.isAbsolute(cacheHandler)
-    //           ? cacheHandler
-    //           : path.join(dir, cacheHandler)
-    //       )
-    //     )
-    //   }
-    //   if (cacheHandlers) {
-    //     for (const handlerPath of Object.values(cacheHandlers)) {
-    //       if (handlerPath) {
-    //         sharedEntriesSet.push(
-    //           require.resolve(
-    //             path.isAbsolute(handlerPath)
-    //               ? handlerPath
-    //               : path.join(dir, handlerPath)
-    //           )
-    //         )
-    //       }
-    //     }
-    //   }
+    let cache_handler_entries: Vec<Vc<Box<dyn Module>>> = cache_handler
+        .into_iter()
+        .chain(cache_handlers.into_iter())
+        .map(|f| {
+            asset_context
+                .process(
+                    Vc::upcast(FileSource::new(f.clone())),
+                    ReferenceType::CommonJs(CommonJsReferenceSubType::Undefined),
+                )
+                .module()
+        })
+        .collect();
 
     let server_entries = shared_entries
         .iter()
+        .chain(cache_handler_entries.iter())
         .copied()
         .chain(if is_standalone {
             Either::Left(
@@ -119,6 +118,7 @@ pub async fn next_server_nft_assets(project: Vc<Project>) -> Result<Vc<OutputAss
 
     let minimal_server_entries = shared_entries
         .iter()
+        .chain(cache_handler_entries.iter())
         .copied()
         .chain(resolve_entry("next/dist/compiled/next-server/server.runtime.prod").await?)
         .map(|m| Vc::upcast::<Box<dyn OutputAsset>>(TracedAsset::new(m)).to_resolved())
