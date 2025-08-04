@@ -42,7 +42,7 @@ module.exports = {
         return
       }
 
-      let requireSource = node.arguments[0].value
+      let requireSource
       if (node.arguments[0].type === 'TemplateLiteral') {
         if (node.arguments[0].quasis.length === 1) {
           requireSource = node.arguments[0].quasis[0].value.cooked
