@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react'
 
 import { Errors } from './errors'
 import { withShadowPortal } from '../storybook/with-shadow-portal'
+import { withDevOverlayContexts } from '../storybook/with-dev-overlay-contexts'
 import { lorem } from '../utils/lorem'
 import { runtimeErrors } from '../storybook/errors'
 
@@ -10,7 +11,7 @@ const meta: Meta<typeof Errors> = {
   parameters: {
     layout: 'fullscreen',
   },
-  decorators: [withShadowPortal],
+  decorators: [withShadowPortal, withDevOverlayContexts()],
 }
 
 export default meta

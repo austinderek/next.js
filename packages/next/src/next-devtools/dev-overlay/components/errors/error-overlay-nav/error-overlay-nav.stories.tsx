@@ -1,13 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react'
 import { ErrorOverlayNav } from './error-overlay-nav'
 import { withShadowPortal } from '../../../storybook/with-shadow-portal'
+import { withDevOverlayContexts } from '../../../storybook/with-dev-overlay-contexts'
 
 const meta: Meta<typeof ErrorOverlayNav> = {
   component: ErrorOverlayNav,
   parameters: {
     layout: 'fullscreen',
   },
-  decorators: [withShadowPortal],
+  decorators: [withShadowPortal, withDevOverlayContexts()],
 }
 
 export default meta

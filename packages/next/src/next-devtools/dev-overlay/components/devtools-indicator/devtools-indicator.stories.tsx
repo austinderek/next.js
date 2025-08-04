@@ -1,9 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react'
-import type { OverlayState } from '../../shared'
 
 import { DevToolsIndicator } from './devtools-indicator'
-import { INITIAL_OVERLAY_STATE } from '../../shared'
 import { withShadowPortal } from '../../storybook/with-shadow-portal'
+import { withDevOverlayContexts } from '../../storybook/with-dev-overlay-contexts'
 
 const meta: Meta<typeof DevToolsIndicator> = {
   component: DevToolsIndicator,
@@ -13,6 +12,7 @@ const meta: Meta<typeof DevToolsIndicator> = {
   argTypes: {},
   decorators: [
     withShadowPortal,
+    withDevOverlayContexts(),
     // Test for high z-index
     (Story) => (
       <div
@@ -39,31 +39,22 @@ const meta: Meta<typeof DevToolsIndicator> = {
 export default meta
 type Story = StoryObj<typeof DevToolsIndicator>
 
-const state: OverlayState = {
-  ...INITIAL_OVERLAY_STATE,
-  routerType: 'app',
-  isErrorOverlayOpen: false,
-}
-
 export const Default: Story = {
-  args: {
-    state,
-    dispatch: () => {},
-  },
+  decorators: [withDevOverlayContexts()],
 }
 
 export const SingleError: Story = {
-  args: {
-    errorCount: 1,
-    state,
-    dispatch: () => {},
-  },
+  decorators: [
+    withDevOverlayContexts({
+      totalErrorCount: 1,
+    }),
+  ],
 }
 
 export const MultipleErrors: Story = {
-  args: {
-    errorCount: 3,
-    state,
-    dispatch: () => {},
-  },
+  decorators: [
+    withDevOverlayContexts({
+      totalErrorCount: 3,
+    }),
+  ],
 }

@@ -1,13 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react'
 import { ErrorOverlayLayout } from './error-overlay-layout'
 import { withShadowPortal } from '../../../storybook/with-shadow-portal'
+import { withDevOverlayContexts } from '../../../storybook/with-dev-overlay-contexts'
 
 const meta: Meta<typeof ErrorOverlayLayout> = {
   component: ErrorOverlayLayout,
   parameters: {
     layout: 'fullscreen',
   },
-  decorators: [withShadowPortal],
+  decorators: [withShadowPortal, withDevOverlayContexts()],
 }
 
 export default meta

@@ -1,13 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react'
 import { NodejsInspectorButton } from './nodejs-inspector-button'
 import { withShadowPortal } from '../../../storybook/with-shadow-portal'
+import { withDevOverlayContexts } from '../../../storybook/with-dev-overlay-contexts'
 
 const meta: Meta<typeof NodejsInspectorButton> = {
   component: NodejsInspectorButton,
   parameters: {
     layout: 'centered',
   },
-  decorators: [withShadowPortal],
+  decorators: [withShadowPortal, withDevOverlayContexts()],
 }
 
 export default meta

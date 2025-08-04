@@ -1,13 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react'
 import { CodeFrame } from './code-frame'
 import { withShadowPortal } from '../../storybook/with-shadow-portal'
+import { withDevOverlayContexts } from '../../storybook/with-dev-overlay-contexts'
 
 const meta: Meta<typeof CodeFrame> = {
   component: CodeFrame,
   parameters: {
     layout: 'fullscreen',
   },
-  decorators: [withShadowPortal],
+  decorators: [withShadowPortal, withDevOverlayContexts()],
 }
 
 export default meta
