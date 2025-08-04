@@ -1354,7 +1354,7 @@ export const defaultConfig = Object.freeze({
         expire: INFINITE_CACHE,
       },
       seconds: {
-        stale: undefined, // defaults to staleTimes.dynamic
+        stale: 30, // 30 seconds
         revalidate: 1, // 1 second
         expire: 60, // 1 minute
       },
