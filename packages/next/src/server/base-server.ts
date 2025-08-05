@@ -2649,7 +2649,13 @@ export default abstract class Server<
                 initPathname = normalizer.normalize(initPathname)
               }
             }
-            request.url = `${initPathname}${parsedInitUrl.search || ''}`
+
+            // On minimal mode, the request url of dynamic route can be a
+            // literal dynamic route ('/[slug]') instead of actual URL, so overwriting to initPathname
+            // will transform back the resolved url to the dynamic route pathname.
+            if (!(this.minimalMode && isErrorPathname)) {
+              request.url = `${initPathname}${parsedInitUrl.search || ''}`
+            }
 
             // propagate the request context for dev
             setRequestMeta(request, getRequestMeta(req))
