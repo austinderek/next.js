@@ -87,3 +87,20 @@ pub fn spawn_thread(func: impl FnOnce() + Send + 'static) {
         })
     });
 }
+
+/// Tells the scheduler about blocking work happening in the current thread.
+/// It will make sure to allocate extra threads for the pool.
+pub fn block_in_place<R>(f: impl FnOnce() -> R + Send) -> R
+where
+    R: Send,
+{
+    tokio::task::block_in_place(f)
+}
+
+/// Blocks the current thread until the future is resolved.
+pub fn block_for_future<T>(future: impl Future<Output = T> + Send) -> T
+where
+    T: Send,
+{
+    block_in_place(|| Handle::current().block_on(future))
+}
