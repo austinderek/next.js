@@ -107,7 +107,6 @@ pub async fn cjs_resolve(
     issue_source: Option<IssueSource>,
     is_optional: bool,
 ) -> Result<Vc<ModuleResolveResult>> {
-    // TODO pass CommonJsReferenceSubType
     let ty = ReferenceType::CommonJs(CommonJsReferenceSubType::Undefined);
     let options = apply_cjs_specific_options(origin.resolve_options(ty.clone()).await?)
         .resolve()
@@ -122,7 +121,6 @@ pub async fn cjs_resolve_source(
     issue_source: Option<IssueSource>,
     is_optional: bool,
 ) -> Result<Vc<ResolveResult>> {
-    // TODO pass CommonJsReferenceSubType
     let ty = ReferenceType::CommonJs(CommonJsReferenceSubType::Undefined);
     let options = apply_cjs_specific_options(origin.resolve_options(ty.clone()).await?)
         .resolve()
