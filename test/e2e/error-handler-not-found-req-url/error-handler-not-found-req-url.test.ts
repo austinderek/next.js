@@ -6,8 +6,8 @@ describe('error-handler-not-found-req-url', () => {
   })
 
   it('should log the correct request url and asPath for not found _error page', async () => {
-    await next.browser('/3')
-
-    expect(await next.cliOutput).toContain(`{ reqUrl: '/3', asPath: '/3' }`)
+    const browser = await next.browser('/3')
+    const p = await browser.elementByCss('p')
+    expect(await p.text()).toBe('reqUrl: /3, asPath: /3')
   })
 })

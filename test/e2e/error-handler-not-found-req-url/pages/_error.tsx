@@ -1,13 +1,22 @@
 import type { NextPageContext } from 'next'
 
 Error.getInitialProps = (ctx: NextPageContext) => {
-  console.log({
+  return {
     reqUrl: ctx.req?.url,
     asPath: ctx.asPath,
-  })
-  return {}
+  }
 }
 
-export default function Error() {
-  return <>Error</>
+export default function Error({
+  reqUrl,
+  asPath,
+}: {
+  reqUrl?: string
+  asPath?: string
+}) {
+  return (
+    <p>
+      reqUrl: {reqUrl}, asPath: {asPath}
+    </p>
+  )
 }
