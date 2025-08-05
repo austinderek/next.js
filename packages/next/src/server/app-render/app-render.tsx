@@ -1759,6 +1759,8 @@ async function renderToHTMLOrFlightImpl(
       renderOpts.renderResumeDataCache ?? postponedState?.renderResumeDataCache
 
     const rootParams = getRootParams(loaderTree, ctx.getDynamicParamFromSegment)
+    const devValidatingFallbackParams =
+      getRequestMeta(req, 'devValidatingFallbackParams') || null
     const requestStore = createRequestStoreForRender(
       req,
       res,
@@ -1769,7 +1771,8 @@ async function renderToHTMLOrFlightImpl(
       renderOpts.previewProps,
       isHmrRefresh,
       serverComponentsHmrCache,
-      renderResumeDataCache
+      renderResumeDataCache,
+      devValidatingFallbackParams
     )
 
     if (
@@ -1841,7 +1844,8 @@ async function renderToHTMLOrFlightImpl(
             notFoundLoaderTree,
             formState,
             postponedState,
-            metadata
+            metadata,
+            devValidatingFallbackParams
           )
 
           return new RenderResult(stream, {
@@ -1872,7 +1876,8 @@ async function renderToHTMLOrFlightImpl(
       loaderTree,
       formState,
       postponedState,
-      metadata
+      metadata,
+      devValidatingFallbackParams
     )
 
     // Invalid dynamic usages should only error the request in development.
@@ -2058,7 +2063,8 @@ async function renderToStream(
   tree: LoaderTree,
   formState: any,
   postponedState: PostponedState | null,
-  metadata: AppPageRenderResultMetadata
+  metadata: AppPageRenderResultMetadata,
+  devValidatingFallbackParams: FallbackRouteParams | null
 ): Promise<ReadableStream<Uint8Array>> {
   const { assetPrefix, nonce, pagePath, renderOpts } = ctx
 
@@ -2204,9 +2210,6 @@ async function renderToStream(
           requestStore.prerenderPhase = false
         }
       )
-
-      const devValidatingFallbackParams =
-        getRequestMeta(req, 'devValidatingFallbackParams') || null
 
       spawnDynamicValidationInDev(
         resolveValidation,
