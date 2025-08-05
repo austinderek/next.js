@@ -1,4 +1,4 @@
-import foo from 'globalExternalFoo'
+import foo from 'testGlobalExternalValue'
 
 it('should access global external values', () => {
   expect(foo).toEqual({ bar: '11' })
