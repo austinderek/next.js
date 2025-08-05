@@ -105,16 +105,12 @@ impl KeyValueDatabase for TurboKeyValueDatabase {
         // Compact the database on shutdown
         if self.is_ci {
             // Fully compact in CI to reduce cache size
-            do_compact(
-                &self.db,
-                "Finished final full database compaction (CI)",
-                usize::MAX,
-            )?;
+            do_compact(&self.db, "Finished database compaction", usize::MAX)?;
         } else {
             // Compact with a reasonable limit in non-CI environments
             do_compact(
                 &self.db,
-                "Finished final database compaction",
+                "Finished database compaction",
                 available_parallelism().map_or(4, |c| max(4, c.get())),
             )?;
         }
@@ -172,7 +168,7 @@ impl<'a> BaseWriteBatch<'a> for TurboWriteBatch<'a> {
             let handle = spawn(async move {
                 do_compact(
                     &db,
-                    "Finished background database compaction after write",
+                    "Finished database compaction",
                     available_parallelism().map_or(4, |c| max(4, c.get() / 2)),
                 )
             });
