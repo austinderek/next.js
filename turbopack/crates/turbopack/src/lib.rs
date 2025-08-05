@@ -582,8 +582,8 @@ async fn process_default_internal(
                                     .to_resolved()
                                     .await?,
                                 main: extend_main.extend(*main).to_resolved().await?,
-                                postprocess: extend_postprocess
-                                    .extend(*postprocess)
+                                postprocess: postprocess
+                                    .extend(**extend_postprocess)
                                     .to_resolved()
                                     .await?,
                                 options,
@@ -601,8 +601,8 @@ async fn process_default_internal(
                                     .to_resolved()
                                     .await?,
                                 main: extend_main.extend(*main).to_resolved().await?,
-                                postprocess: extend_postprocess
-                                    .extend(*postprocess)
+                                postprocess: postprocess
+                                    .extend(**extend_postprocess)
                                     .to_resolved()
                                     .await?,
                                 tsx,

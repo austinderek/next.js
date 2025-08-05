@@ -40,7 +40,7 @@ pub async fn get_remove_console_transform_rule(
             get_ecma_transform_rule(
                 Box::new(RemoveConsoleTransformer { config }),
                 enable_mdx_rs,
-                EcmascriptTransformStage::Main,
+                EcmascriptTransformStage::Preprocess,
             )
         });
 

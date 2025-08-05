@@ -44,7 +44,7 @@ pub async fn get_next_react_server_components_transform_rule(
             app_dir,
         )),
         enable_mdx_rs,
-        EcmascriptTransformStage::Main,
+        EcmascriptTransformStage::Preprocess,
     ))
 }
 

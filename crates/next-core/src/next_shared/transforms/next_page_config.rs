@@ -18,8 +18,8 @@ pub fn get_next_page_config_rule(enable_mdx_rs: bool, pages_dir: FileSystemPath)
         module_rule_match_pages_page_file(enable_mdx_rs, pages_dir),
         vec![ModuleRuleEffect::ExtendEcmascriptTransforms {
             preprocess: ResolvedVc::cell(vec![]),
-            main: ResolvedVc::cell(vec![transformer]),
-            postprocess: ResolvedVc::cell(vec![]),
+            main: ResolvedVc::cell(vec![]),
+            postprocess: ResolvedVc::cell(vec![transformer]),
         }],
     )
 }

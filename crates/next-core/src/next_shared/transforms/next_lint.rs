@@ -12,7 +12,7 @@ pub fn get_next_lint_transform_rule(enable_mdx_rs: bool) -> ModuleRule {
     get_ecma_transform_rule(
         Box::new(LintTransformer {}),
         enable_mdx_rs,
-        EcmascriptTransformStage::Main,
+        EcmascriptTransformStage::Preprocess,
     )
 }
 

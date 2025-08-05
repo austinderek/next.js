@@ -17,7 +17,7 @@ pub async fn get_relay_transform_rule(
         get_ecma_transform_rule(
             Box::new(RelayTransformer::new(config, &project_path)),
             enable_mdx_rs,
-            EcmascriptTransformStage::Main,
+            EcmascriptTransformStage::Preprocess,
         )
     });
 

@@ -16,8 +16,8 @@ pub fn get_middleware_dynamic_assert_rule(enable_mdx_rs: bool) -> ModuleRule {
         module_rule_match_js_no_url(enable_mdx_rs),
         vec![ModuleRuleEffect::ExtendEcmascriptTransforms {
             preprocess: ResolvedVc::cell(vec![]),
-            main: ResolvedVc::cell(vec![transformer]),
-            postprocess: ResolvedVc::cell(vec![]),
+            main: ResolvedVc::cell(vec![]),
+            postprocess: ResolvedVc::cell(vec![transformer]),
         }],
     )
 }
