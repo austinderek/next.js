@@ -378,7 +378,7 @@ async fn run_test_operation(prepared_test: ResolvedVc<PreparedTest>) -> Result<V
             .resolved_cell(),
     );
     import_map.insert_exact_alias(
-        rcstr!("foo"),
+        rcstr!("testGlobalExternalValue"),
         ImportMapping::External(None, ExternalType::Global, ExternalTraced::Untraced)
             .resolved_cell(),
     );
