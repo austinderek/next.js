@@ -105,7 +105,7 @@ impl EmotionTransformer {
             auto_label: match config.auto_label.as_ref() {
                 Some(EmotionLabelKind::Always) => Some(true),
                 Some(EmotionLabelKind::Never) => Some(false),
-                // [TODO]: this is not correct (doesn't take current mode into account)ƒ
+                // [TODO]: this is not correct (doesn't take current mode into account)
                 Some(EmotionLabelKind::DevOnly) => None,
                 None => None,
             },
