@@ -2,11 +2,10 @@ use std::{cmp::max, path::PathBuf, sync::Arc, thread::available_parallelism, tim
 
 use anyhow::{Ok, Result};
 use parking_lot::Mutex;
-use tokio::{runtime::Handle, task::block_in_place};
 use turbo_persistence::{
     ArcSlice, CompactConfig, KeyBase, StoreKey, TurboPersistence, ValueBuffer,
 };
-use turbo_tasks::{JoinHandle, message_queue::TimingEvent, spawn, turbo_tasks};
+use turbo_tasks::{JoinHandle, block_for_future, message_queue::TimingEvent, spawn, turbo_tasks};
 
 use crate::database::{
     key_value_database::{KeySpace, KeyValueDatabase},
@@ -84,7 +83,7 @@ impl KeyValueDatabase for TurboKeyValueDatabase {
     ) -> Result<WriteBatch<'_, Self::SerialWriteBatch<'_>, Self::ConcurrentWriteBatch<'_>>> {
         // Wait for the compaction to finish
         if let Some(join_handle) = self.compact_join_handle.lock().take() {
-            join(join_handle)?;
+            block_for_future(join_handle)?;
         }
         // Start a new write batch
         Ok(WriteBatch::concurrent(TurboWriteBatch {
@@ -100,7 +99,7 @@ impl KeyValueDatabase for TurboKeyValueDatabase {
     fn shutdown(&self) -> Result<()> {
         // Wait for the compaction to finish
         if let Some(join_handle) = self.compact_join_handle.lock().take() {
-            join(join_handle)?;
+            block_for_future(join_handle)?;
         }
         // Compact the database on shutdown
         if self.is_ci {
@@ -240,8 +239,4 @@ impl<'l> From<WriteBuffer<'l>> for ValueBuffer<'l> {
             WriteBuffer::SmallVec(sv) => ValueBuffer::SmallVec(sv),
         }
     }
-}
-
-fn join(handle: JoinHandle<Result<()>>) -> Result<()> {
-    block_in_place(|| Handle::current().block_on(handle))
 }
