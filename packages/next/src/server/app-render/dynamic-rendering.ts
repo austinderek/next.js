@@ -40,7 +40,8 @@ import {
   METADATA_BOUNDARY_NAME,
   VIEWPORT_BOUNDARY_NAME,
   OUTLET_BOUNDARY_NAME,
-} from '../../lib/metadata/metadata-constants'
+  ROOT_LAYOUT_BOUNDARY_NAME,
+} from '../../lib/framework/boundary-constants'
 import { scheduleOnNextTick } from '../../lib/scheduler'
 import { BailoutToCSRError } from '../../shared/lib/lazy-dynamic/bailout-to-csr'
 import { InvariantError } from '../../shared/lib/invariant-error'
@@ -639,6 +640,21 @@ export function useDynamicRouteParams(expression: string) {
 const hasSuspenseRegex = /\n\s+at Suspense \(<anonymous>\)/
 const hasSuspenseAfterBodyOrHtmlRegex =
   /\n\s+at (?:body|html) \(<anonymous>\)[\s\S]*?\n\s+at Suspense \(<anonymous>\)/
+// Detects when RootLayoutBoundary (our framework marker component) appears
+// after Suspense in the component stack, indicating the root layout is wrapped
+// within a Suspense boundary. Ensures no body/html components are in between.
+//
+// Example matches:
+//   at Suspense (<anonymous>)
+//   at __next_root_layout_boundary__ (<anonymous>)
+//
+// Or with other components in between (but not body/html):
+//   at Suspense (<anonymous>)
+//   at SomeComponent (<anonymous>)
+//   at __next_root_layout_boundary__ (<anonymous>)
+const hasSuspenseBeforeRootLayoutWithoutBodyRegex = new RegExp(
+  `\\n\\s+at Suspense \\(<anonymous>\\)(?:(?!\\n\\s+at (?:body|html) \\(<anonymous>\\))[\\s\\S])*?\\n\\s+at ${ROOT_LAYOUT_BOUNDARY_NAME} \\(<anonymous>\\)`
+)
 const hasMetadataRegex = new RegExp(
   `\\n\\s+at ${METADATA_BOUNDARY_NAME}[\\n\\s]`
 )
@@ -665,6 +681,14 @@ export function trackAllowedDynamicAccess(
   } else if (hasSuspenseAfterBodyOrHtmlRegex.test(componentStack)) {
     // This prerender has a Suspense boundary above the body which
     // effectively opts the page into allowing 100% dynamic rendering
+    dynamicValidation.hasAllowedDynamic = true
+    dynamicValidation.hasSuspenseAboveBody = true
+    return
+  } else if (hasSuspenseBeforeRootLayoutWithoutBodyRegex.test(componentStack)) {
+    // This prerender has the root layout wrapped within a Suspense boundary
+    // (detected via RootLayoutBoundary pattern) which effectively opts
+    // the page into allowing 100% dynamic rendering
+
     dynamicValidation.hasAllowedDynamic = true
     dynamicValidation.hasSuspenseAboveBody = true
     return
