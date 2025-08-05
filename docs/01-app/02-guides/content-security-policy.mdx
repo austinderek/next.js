@@ -455,7 +455,7 @@ As an alternative to nonces, Next.js offers experimental support for hash-based 
 
 ### How SRI works
 
-Instead of using nonces, SRI generates cryptographic hashes of your JavaScript and CSS files at build time. These hashes are then used in your CSP policy to allow specific scripts and styles.
+Instead of using nonces, SRI generates cryptographic hashes of your JavaScript files at build time. These hashes are added as `integrity` attributes to script tags, allowing browsers to verify that files haven't been modified during transit.
 
 ### Enabling SRI
 
