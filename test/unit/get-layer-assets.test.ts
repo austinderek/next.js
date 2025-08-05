@@ -1,32 +1,23 @@
-import { getLayerAssets } from '../../packages/next/src/server/app-render/get-layer-assets'
-import type { AppRenderContext } from '../../packages/next/src/server/app-render/app-render'
-import type { PreloadCallbacks } from '../../packages/next/src/server/app-render/types'
+import { getLayerAssets } from 'next/dist/server/app-render/get-layer-assets'
+import type { AppRenderContext } from 'next/dist/server/app-render/app-render'
+import type { PreloadCallbacks } from 'next/dist/server/app-render/types'
 
 // Mock the dependencies
-jest.mock(
-  '../../packages/next/src/server/app-render/get-css-inlined-link-tags',
-  () => ({
-    getLinkAndScriptTags: jest.fn(() => ({ styles: [], scripts: [] })),
-  })
-)
+jest.mock('next/dist/server/app-render/get-css-inlined-link-tags', () => ({
+  getLinkAndScriptTags: jest.fn(() => ({ styles: [], scripts: [] })),
+}))
 
-jest.mock(
-  '../../packages/next/src/server/app-render/get-preloadable-fonts',
-  () => ({
-    getPreloadableFonts: jest.fn(),
-  })
-)
+jest.mock('next/dist/server/app-render/get-preloadable-fonts', () => ({
+  getPreloadableFonts: jest.fn(),
+}))
 
-jest.mock(
-  '../../packages/next/src/server/app-render/render-css-resource',
-  () => ({
-    renderCssResource: jest.fn(() => []),
-  })
-)
+jest.mock('next/dist/server/app-render/render-css-resource', () => ({
+  renderCssResource: jest.fn(() => []),
+}))
 
 const {
   getPreloadableFonts,
-} = require('../../packages/next/src/server/app-render/get-preloadable-fonts')
+} = require('next/dist/server/app-render/get-preloadable-fonts')
 
 describe('getLayerAssets', () => {
   let mockCtx: AppRenderContext
