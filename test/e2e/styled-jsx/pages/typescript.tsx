@@ -2,13 +2,19 @@ interface Props {
   color: string
 }
 
-export default (p: Props) => (
-  <div>
-    <p>test</p>
-    <style jsx>{`
-      span {
-        color: ${p.color};
-      }
-    `}</style>
-  </div>
-)
+function Test(p: Props) {
+  return (
+    <div>
+      <button>test</button>
+      <style jsx>{`
+        button {
+          color: ${p.color};
+        }
+      `}</style>
+    </div>
+  )
+}
+
+export default function Page() {
+  return <Test color="red" />
+}
