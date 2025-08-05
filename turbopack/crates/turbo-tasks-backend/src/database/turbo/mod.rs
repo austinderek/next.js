@@ -90,7 +90,6 @@ impl KeyValueDatabase for TurboKeyValueDatabase {
         Ok(WriteBatch::concurrent(TurboWriteBatch {
             batch: self.db.write_batch()?,
             db: &self.db,
-            is_ci: self.is_ci,
             compact_join_handle: (!self.is_short_session && !self.db.is_empty())
                 .then_some(&self.compact_join_handle),
         }))
@@ -108,7 +107,6 @@ impl KeyValueDatabase for TurboKeyValueDatabase {
             // Fully compact in CI to reduce cache size
             do_compact(
                 &self.db,
-                self.is_ci,
                 "Finished final full database compaction (CI)",
                 usize::MAX,
             )?;
@@ -116,7 +114,6 @@ impl KeyValueDatabase for TurboKeyValueDatabase {
             // Compact with a reasonable limit in non-CI environments
             do_compact(
                 &self.db,
-                self.is_ci,
                 "Finished final database compaction",
                 available_parallelism().map_or(4, |c| max(4, c.get())),
             )?;
@@ -128,18 +125,17 @@ impl KeyValueDatabase for TurboKeyValueDatabase {
 
 fn do_compact(
     db: &TurboPersistence<TurboTasksParallelScheduler>,
-    is_ci: bool,
     message: &'static str,
     max_merge_segment_count: usize,
 ) -> Result<()> {
     let start = Instant::now();
     // Compact the database with the given max merge segment count
-    db.compact(&CompactConfig {
+    let ran = db.compact(&CompactConfig {
         max_merge_segment_count,
         ..COMPACT_CONFIG
     })?;
-    let elapsed = start.elapsed();
-    if is_ci || elapsed.as_millis() > 500 {
+    if ran {
+        let elapsed = start.elapsed();
         turbo_tasks()
             .send_compilation_event(Arc::new(TimingEvent::new(message.to_string(), elapsed)));
     }
@@ -149,7 +145,6 @@ fn do_compact(
 pub struct TurboWriteBatch<'a> {
     batch: turbo_persistence::WriteBatch<WriteBuffer<'static>, TurboTasksParallelScheduler, 5>,
     db: &'a Arc<TurboPersistence<TurboTasksParallelScheduler>>,
-    is_ci: bool,
     compact_join_handle: Option<&'a Mutex<Option<JoinHandle<Result<()>>>>>,
 }
 
@@ -174,11 +169,9 @@ impl<'a> BaseWriteBatch<'a> for TurboWriteBatch<'a> {
         if let Some(compact_join_handle) = self.compact_join_handle {
             // Start a new compaction in the background
             let db = self.db.clone();
-            let is_ci = self.is_ci;
             let handle = spawn(async move {
                 do_compact(
                     &db,
-                    is_ci,
                     "Finished background database compaction after write",
                     available_parallelism().map_or(4, |c| max(4, c.get() / 2)),
                 )
