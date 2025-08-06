@@ -8,7 +8,6 @@ import {
 } from '../../utils/get-error-by-type'
 import type { ComponentStackFrame } from '../../utils/parse-component-stack'
 
-
 export type SupportedErrorEvent = {
   id: number
   error: Error
@@ -24,7 +23,7 @@ type Props = {
   }) => React.ReactNode
   state: OverlayState
   isAppDir: boolean
-  dispatch: OverlayDispatch
+  _dispatch: OverlayDispatch
 }
 
 export const RenderError = (props: Props) => {
@@ -38,7 +37,12 @@ export const RenderError = (props: Props) => {
   }
 }
 
-const RenderRuntimeError = ({ children, state, isAppDir, dispatch }: Props) => {
+const RenderRuntimeError = ({
+  children,
+  state,
+  isAppDir,
+  _dispatch,
+}: Props) => {
   const { errors } = state
 
   const [lookups, setLookups] = useState<{
@@ -66,8 +70,6 @@ const RenderRuntimeError = ({ children, state, isAppDir, dispatch }: Props) => {
 
     return [ready, next]
   }, [errors, lookups])
-
-
 
   useEffect(() => {
     if (nextError == null) {
