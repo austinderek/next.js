@@ -1715,6 +1715,25 @@ function enforceExperimentalFeatures(
     }
   }
 
+  // TODO: Remove this once we've made Client Param Parsing the default.
+  if (
+    process.env.__NEXT_EXPERIMENTAL_PPR === 'true' &&
+    // We do respect an explicit value in the user config.
+    (config.experimental.clientParamParsing === undefined ||
+      (isDefaultConfig && !config.experimental.clientParamParsing))
+  ) {
+    config.experimental.clientParamParsing = true
+
+    if (configuredExperimentalFeatures) {
+      addConfiguredExperimentalFeature(
+        configuredExperimentalFeatures,
+        'clientParamParsing',
+        true,
+        'enabled by `__NEXT_EXPERIMENTAL_PPR`'
+      )
+    }
+  }
+
   // TODO: Remove this once we've made Cache Components the default.
   if (
     process.env.__NEXT_EXPERIMENTAL_CACHE_COMPONENTS === 'true' &&

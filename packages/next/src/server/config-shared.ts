@@ -331,6 +331,7 @@ export interface ExperimentalConfig {
   linkNoTouchStart?: boolean
   caseSensitiveRoutes?: boolean
   clientSegmentCache?: boolean | 'client-only'
+  clientParamParsing?: boolean
   dynamicOnHover?: boolean
   appDocumentPreloading?: boolean
   preloadEntriesOnStart?: boolean
@@ -1400,6 +1401,7 @@ export const defaultConfig = Object.freeze({
     linkNoTouchStart: false,
     caseSensitiveRoutes: false,
     clientSegmentCache: false,
+    clientParamParsing: false,
     dynamicOnHover: false,
     appDocumentPreloading: undefined,
     preloadEntriesOnStart: true,
