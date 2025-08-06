@@ -1,7 +1,6 @@
 import type { SupportedErrorEvent } from '../container/runtime-error/render-error'
 import { getOriginalStackFrames } from '../../shared/stack-frame'
 import type { OriginalStackFrame } from '../../shared/stack-frame'
-import type { ComponentStackFrame } from './parse-component-stack'
 import { getErrorSource } from '../../../shared/lib/error-source'
 import React from 'react'
 
@@ -10,7 +9,6 @@ export type ReadyRuntimeError = {
   runtime: true
   error: Error & { environmentName?: string }
   frames: OriginalStackFrame[] | (() => Promise<OriginalStackFrame[]>)
-  componentStackFrames?: ComponentStackFrame[]
   type: 'runtime' | 'console' | 'recoverable'
 }
 
@@ -63,9 +61,6 @@ export async function getErrorByType(
         )
       }),
     }
-    if (event.componentStackFrames !== undefined) {
-      readyRuntimeError.componentStackFrames = event.componentStackFrames
-    }
     return readyRuntimeError
   } else {
     const readyRuntimeError: ReadyRuntimeError = {
@@ -76,9 +71,6 @@ export async function getErrorByType(
         getErrorSource(event.error),
         isAppDir
       ),
-    }
-    if (event.componentStackFrames !== undefined) {
-      readyRuntimeError.componentStackFrames = event.componentStackFrames
     }
     return readyRuntimeError
   }
