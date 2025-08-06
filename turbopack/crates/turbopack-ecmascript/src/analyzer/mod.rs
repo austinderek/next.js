@@ -2042,7 +2042,7 @@ impl JsValue {
     /// Returns any matching defined replacement that matches this value (the replacement that
     /// matches `$self.$prop`).
     ///
-    /// Optionally when passed a VarGraph, verifies that the first segment is not a local
+    /// Uses the `VarGraph` to verify that the first segment is not a local
     /// variable/was not reassigned.
     pub fn match_free_var_reference<'a, T>(
         &self,
