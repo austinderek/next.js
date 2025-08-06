@@ -1,3 +1,4 @@
+import cheerio from 'cheerio'
 import { nextTestSetup } from 'e2e-utils'
 
 describe('cache-components-metadata-dynamic-image', () => {
@@ -30,5 +31,22 @@ describe('cache-components-metadata-dynamic-image', () => {
         ? 'no-cache, no-store'
         : 'public, immutable, no-transform, max-age=31536000'
     )
+  })
+
+  it('should work when bot is requesting', async () => {
+    const res = await next.fetch('/123', {
+      headers: {
+        'User-Agent': 'applebot',
+      },
+    })
+
+    const html = await res.text()
+    const $ = cheerio.load(html)
+
+    const iconLink = $('link[rel="icon"]')
+    expect(iconLink.attr('href')).toContain('/123/icon.png')
+
+    const appleIconLink = $('link[rel="apple-touch-icon"]')
+    expect(appleIconLink.attr('href')).toContain('/123/apple-icon')
   })
 })

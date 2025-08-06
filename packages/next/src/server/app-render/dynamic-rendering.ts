@@ -639,9 +639,6 @@ export function useDynamicRouteParams(expression: string) {
 const hasSuspenseRegex = /\n\s+at Suspense \(<anonymous>\)/
 const hasSuspenseAfterBodyOrHtmlRegex =
   /\n\s+at (?:body|html) \(<anonymous>\)[\s\S]*?\n\s+at Suspense \(<anonymous>\)/
-const hasSuspenseAboveMetadataRegex = new RegExp(
-  `\\n\\s+at Suspense \\(<anonymous>\\)[\\s\\S]*?\\n\\s+at ${METADATA_BOUNDARY_NAME}[\\n\\s]`
-)
 const hasMetadataRegex = new RegExp(
   `\\n\\s+at ${METADATA_BOUNDARY_NAME}[\\n\\s]`
 )
@@ -661,11 +658,12 @@ export function trackAllowedDynamicAccess(
     return
   } else if (hasMetadataRegex.test(componentStack)) {
     dynamicValidation.hasDynamicMetadata = true
-    // Metadata files inside dynamic routes need to resolve their params to
-    // insert tags into the head with resolved href. When streaming metadata,
-    // we expect the Suspense boundary to be above the Metadata boundary which
-    // allows metadata to access the dynamic params.
-    if (hasSuspenseAboveMetadataRegex.test(componentStack)) {
+    // Metadata image files inside dynamic routes need to access the dynamic
+    // params to resolve their href in link tags, which will trigger postpone.
+    // This is ok for streaming metadata because the MetadataResolver is wrapped
+    // with Suspense. For non-streaming metadata i.e. user-agent bot requests,
+    // the metadata will be resolved in getMetadataReady() and dynamic rendered.
+    if (workStore.resolvingMetadataImage) {
       dynamicValidation.hasAllowedDynamic = true
     }
     return

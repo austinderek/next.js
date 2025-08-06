@@ -103,6 +103,14 @@ export interface WorkStore {
   dev: boolean
 
   /**
+   * Metadata image files inside dynamic routes need to access the dynamic
+   * params to resolve their href in link tags, which will trigger postpone.
+   * This flag helps us distinguish between if the dynamic access was from
+   * metadata image files or was from something else like `generateMetadata()`.
+   */
+  resolvingMetadataImage?: boolean
+
+  /**
    * Run the given function inside a clean AsyncLocalStorage snapshot. This is
    * useful when generating cache entries, to ensure that the cache generation
    * cannot read anything from the context we're currently executing in, which

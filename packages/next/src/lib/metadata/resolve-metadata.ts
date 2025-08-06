@@ -412,13 +412,16 @@ function getDefinedMetadata(
 async function collectStaticImagesFiles(
   metadata: AppDirModules['metadata'],
   props: any,
-  type: keyof NonNullable<AppDirModules['metadata']>
+  type: keyof NonNullable<AppDirModules['metadata']>,
+  workStore: WorkStore
 ) {
   if (!metadata?.[type]) return undefined
 
   const iconPromises = metadata[type as 'icon' | 'apple'].map(
-    async (imageModule: (p: any) => Promise<MetadataImageModule[]>) =>
-      interopDefault(await imageModule(props))
+    async (imageModule: (p: any) => Promise<MetadataImageModule[]>) => {
+      workStore.resolvingMetadataImage = true
+      return interopDefault(await imageModule(props))
+    }
   )
 
   return iconPromises?.length > 0
@@ -428,16 +431,17 @@ async function collectStaticImagesFiles(
 
 async function resolveStaticMetadata(
   modules: AppDirModules,
-  props: any
+  props: any,
+  workStore: WorkStore
 ): Promise<StaticMetadata> {
   const { metadata } = modules
   if (!metadata) return null
 
   const [icon, apple, openGraph, twitter] = await Promise.all([
-    collectStaticImagesFiles(metadata, props, 'icon'),
-    collectStaticImagesFiles(metadata, props, 'apple'),
-    collectStaticImagesFiles(metadata, props, 'openGraph'),
-    collectStaticImagesFiles(metadata, props, 'twitter'),
+    collectStaticImagesFiles(metadata, props, 'icon', workStore),
+    collectStaticImagesFiles(metadata, props, 'apple', workStore),
+    collectStaticImagesFiles(metadata, props, 'openGraph', workStore),
+    collectStaticImagesFiles(metadata, props, 'twitter', workStore),
   ])
 
   const staticMetadata = {
@@ -459,6 +463,7 @@ async function collectMetadata({
   props,
   route,
   errorConvention,
+  workStore,
 }: {
   tree: LoaderTree
   metadataItems: MetadataItems
@@ -466,6 +471,7 @@ async function collectMetadata({
   props: any
   route: string
   errorConvention?: MetadataErrorType
+  workStore: WorkStore
 }) {
   let mod
   let modType
@@ -486,7 +492,11 @@ async function collectMetadata({
     route += `/${modType}`
   }
 
-  const staticFilesMetadata = await resolveStaticMetadata(tree[2], props)
+  const staticFilesMetadata = await resolveStaticMetadata(
+    tree[2],
+    props,
+    workStore
+  )
   const metadataExport = mod ? getDefinedMetadata(mod, props, { route }) : null
 
   metadataItems.push([metadataExport, staticFilesMetadata])
@@ -629,6 +639,7 @@ async function resolveMetadataItemsImpl(
       // __PAGE__ shouldn't be shown in a route
       .filter((s) => s !== PAGE_SEGMENT_KEY)
       .join('/'),
+    workStore,
   })
 
   for (const key in parallelRoutes) {
