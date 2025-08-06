@@ -244,6 +244,14 @@ const isOutputExportMode =
   process.env.NODE_ENV === 'production' &&
   process.env.__NEXT_CONFIG_OUTPUT === 'export'
 
+/**
+ * Ensures a minimum stale time of 30s to avoid issues where the server sends a too
+ * short-lived stale time, which would prevent anything from being prefetched.
+ */
+function getStaleTimeMs(staleTimeSeconds: number): number {
+  return Math.max(staleTimeSeconds, 30) * 1000
+}
+
 // Route cache entries vary on multiple keys: the href and the Next-Url. Each of
 // these parts needs to be included in the internal cache key. Rather than
 // concatenate the keys into a single key, we use a multi-level map, where the
@@ -1271,7 +1279,7 @@ export async function fetchRouteOnCacheMiss(
         renderedPathname
       )
 
-      const staleTimeMs = serverData.staleTime * 1000
+      const staleTimeMs = getStaleTimeMs(serverData.staleTime)
       fulfillRouteCacheEntry(
         entry,
         routeTree,
@@ -1641,7 +1649,7 @@ function writeDynamicTreeResponseIntoCache(
   )
   const staleTimeMs =
     staleTimeHeaderSeconds !== null
-      ? parseInt(staleTimeHeaderSeconds, 10) * 1000
+      ? getStaleTimeMs(parseInt(staleTimeHeaderSeconds, 10))
       : STATIC_STALETIME_MS
 
   // If the response contains dynamic holes, then we must conservatively assume
@@ -1740,7 +1748,7 @@ function writeDynamicRenderResponseIntoCache(
   )
   const staleTimeMs =
     staleTimeHeaderSeconds !== null
-      ? parseInt(staleTimeHeaderSeconds, 10) * 1000
+      ? getStaleTimeMs(parseInt(staleTimeHeaderSeconds, 10))
       : STATIC_STALETIME_MS
   const staleAt = now + staleTimeMs
 
