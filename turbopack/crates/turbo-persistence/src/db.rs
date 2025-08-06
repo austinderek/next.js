@@ -922,7 +922,7 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
                                     });
                                 }
 
-                                fn create_sst_file<S: ParallelScheduler>(
+                                fn create_sst_file<'l, S: ParallelScheduler>(
                                     parallel_scheduler: &S,
                                     entries: &[LookupEntry<'l>],
                                     total_key_size: usize,
