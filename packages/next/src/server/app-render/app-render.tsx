@@ -2443,7 +2443,7 @@ async function renderToStream(
       getErrorRSCPayload,
       tree,
       ctx,
-      reactServerErrorsByDigest.has((err as any).digest) ? null : err,
+      reactServerErrorsByDigest.has((err as any)?.digest) ? null : err,
       errorType
     )
 
@@ -2969,7 +2969,7 @@ async function spawnDynamicValidationInDev(
                 finalServerReactController.signal.aborted &&
                 isPrerenderInterruptedError(err)
               ) {
-                return err.digest
+                return err?.digest
               }
 
               if (isReactLargeShellError(err)) {
@@ -4411,7 +4411,7 @@ async function prerenderToStream(
       getErrorRSCPayload,
       tree,
       ctx,
-      reactServerErrorsByDigest.has((err as any).digest) ? undefined : err,
+      reactServerErrorsByDigest.has((err as any)?.digest) ? undefined : err,
       errorType
     )
 
