@@ -52,7 +52,9 @@ use swc_core::{
         utils::IsDirective,
         visit::{
             AstParentKind, AstParentNodeRef, VisitAstPath, VisitWithAstPath,
-            fields::{AssignExprField, AssignTargetField, SimpleAssignTargetField},
+            fields::{
+                AssignExprField, AssignTargetField, BindingIdentField, SimpleAssignTargetField,
+            },
         },
     },
 };
@@ -2499,7 +2501,7 @@ async fn handle_typeof(
     analysis: &mut AnalyzeEcmascriptModuleResultBuilder,
 ) -> Result<()> {
     if let Some(value) = arg.match_free_var_reference(
-        Some(state.var_graph),
+        state.var_graph,
         &*state.free_var_references,
         &DefinableNameSegment::TypeOf,
     ) {
@@ -2547,11 +2549,20 @@ async fn handle_free_var_reference(
     // We don't want to replace assignments as this would lead to invalid code.
     if matches!(
         ast_path,
+        // Matches assignments to members
         [
             ..,
             AstParentKind::AssignExpr(AssignExprField::Left),
             AstParentKind::AssignTarget(AssignTargetField::Simple),
             AstParentKind::SimpleAssignTarget(SimpleAssignTargetField::Member),
+        ] |
+        // Matches assignments to identifiers
+        [
+            ..,
+            AstParentKind::AssignExpr(AssignExprField::Left),
+            AstParentKind::AssignTarget(AssignTargetField::Simple),
+            AstParentKind::SimpleAssignTarget(SimpleAssignTargetField::Ident),
+            AstParentKind::BindingIdent(BindingIdentField::Id),
         ]
     ) {
         return Ok(false);
@@ -2901,7 +2912,7 @@ async fn value_visitor_inner(
         let compile_time_info = compile_time_info.await?;
         if let JsValue::TypeOf(_, arg) = &v
             && let Some(value) = arg.match_free_var_reference(
-                Some(var_graph),
+                var_graph,
                 free_var_references,
                 &DefinableNameSegment::TypeOf,
             )
