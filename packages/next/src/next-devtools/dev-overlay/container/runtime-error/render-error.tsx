@@ -7,7 +7,7 @@ import {
   type ReadyRuntimeError,
 } from '../../utils/get-error-by-type'
 import type { ComponentStackFrame } from '../../utils/parse-component-stack'
-import { usePersistentCacheErrorDetection } from '../../components/errors/error-overlay-toolbar/restart-server-button'
+
 
 export type SupportedErrorEvent = {
   id: number
@@ -67,7 +67,7 @@ const RenderRuntimeError = ({ children, state, isAppDir, dispatch }: Props) => {
     return [ready, next]
   }, [errors, lookups])
 
-  usePersistentCacheErrorDetection({ errors, dispatch })
+
 
   useEffect(() => {
     if (nextError == null) {
