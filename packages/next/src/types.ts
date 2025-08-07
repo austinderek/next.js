@@ -7,7 +7,7 @@
 import type { Agent as HttpAgent } from 'http'
 import type { Agent as HttpsAgent } from 'https'
 
-import type React from 'react'
+import type * as React from 'react'
 import type { ParsedUrlQuery } from 'querystring'
 import type { IncomingMessage, ServerResponse } from 'http'
 
@@ -23,6 +23,10 @@ import type { GetStaticPathsFallback } from './lib/fallback'
 import type { NextApiRequestCookies } from './server/api-utils'
 
 import next from './server/next'
+import type {
+  Metadata,
+  ResolvingMetadata,
+} from './lib/metadata/types/metadata-interface'
 
 export type ServerRuntime = 'nodejs' | 'experimental-edge' | 'edge' | undefined
 
@@ -32,16 +36,16 @@ export { NextConfig } from './server/config'
 export type { NextAdapter } from './server/config-shared'
 
 export type {
-  Metadata,
   MetadataRoute,
   ResolvedMetadata,
-  ResolvingMetadata,
   Viewport,
   ResolvingViewport,
   ResolvedViewport,
 } from './lib/metadata/types/metadata-interface'
 
 export type { Instrumentation } from './server/instrumentation/types'
+
+export type { Metadata, ResolvingMetadata }
 
 /**
  * Stub route type for typedRoutes before `next dev` or `next build` is run
@@ -294,6 +298,83 @@ export type GetServerSideProps<
 export type InferGetServerSidePropsType<T extends (args: any) => any> = Awaited<
   Extract<Awaited<ReturnType<T>>, { props: any }>['props']
 >
+
+/**
+ * @see https://nextjs.org/docs/app/api-reference/file-conventions/default
+ */
+export interface DefaultProps<Params = {}> {
+  /**
+   * A promise that resolves to an object containing the
+   * [dynamic route parameters](https://nextjs.org/docs/app/api-reference/file-conventions/dynamic-routes)
+   * from the root segment down to the slot's subpages.
+   */
+  params: Promise<Params>
+}
+
+/**
+ * @see https://nextjs.org/docs/app/api-reference/file-conventions/page
+ */
+export interface PageProps<Params = {}> {
+  /**
+   * A promise that resolves to an object containing the
+   * [dynamic route parameters](https://nextjs.org/docs/app/api-reference/file-conventions/dynamic-routes)
+   * from the root segment down to that page.
+   */
+  params: Promise<Params>
+
+  /**
+   * A promise that resolves to an object containing the
+   * [search parameters](https://developer.mozilla.org/docs/Learn/Common_questions/What_is_a_URL#parameters)
+   * of the current URL.
+   */
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}
+
+/**
+ * @see https://nextjs.org/docs/app/api-reference/file-conventions/layout
+ */
+export interface LayoutProps<Params = {}> {
+  /**
+   * Layout components should accept and use a `children` prop. During rendering,
+   * `children` will be populated with the route segments the layout is wrapping.
+   * These will primarily be the component of a child
+   * [Layout](https://nextjs.org/docs/app/api-reference/file-conventions/page)
+   * (if it exists) or
+   * [Page](https://nextjs.org/docs/app/api-reference/file-conventions/page), but
+   * could also be other special files like
+   * [Loading](https://nextjs.org/docs/app/api-reference/file-conventions/loading)
+   * or [Error](https://nextjs.org/docs/app/getting-started/error-handling) when
+   * applicable.
+   */
+  children: React.ReactNode
+
+  /**
+   * A promise that resolves to an object containing the
+   * [dynamic route parameters](https://nextjs.org/docs/app/api-reference/file-conventions/dynamic-routes)
+   * object from the root segment down to that layout.
+   */
+  params: Promise<Params>
+}
+
+/**
+ * @see https://nextjs.org/docs/app/api-reference/file-conventions/template
+ */
+export interface TemplateProps {
+  /**
+   * Template accepts a `children` prop.
+   */
+  children: React.ReactNode
+}
+
+export interface PageModule<Params = {}> {
+  generateMetadata?: (
+    props: PageProps<Params>,
+    parent: ResolvingMetadata
+  ) => Metadata | PromiseLike<Metadata>
+  generateStaticParams?: () => Params[] | PromiseLike<Params[]>
+  metadata?: Metadata
+  default: React.Component<PageProps<Params>>
+}
 
 declare global {
   interface Crypto {
