@@ -639,6 +639,9 @@ export function useDynamicRouteParams(expression: string) {
 const hasSuspenseRegex = /\n\s+at Suspense \(<anonymous>\)/
 const hasSuspenseAfterBodyOrHtmlRegex =
   /\n\s+at (?:body|html) \(<anonymous>\)[\s\S]*?\n\s+at Suspense \(<anonymous>\)/
+const hasSuspenseAboveMetadataRegex = new RegExp(
+  `\\n\\s+at Suspense \\(<anonymous>\\)[\\s\\S]*?\\n\\s+at ${METADATA_BOUNDARY_NAME}[\\n\\s]`
+)
 const hasMetadataRegex = new RegExp(
   `\\n\\s+at ${METADATA_BOUNDARY_NAME}[\\n\\s]`
 )
@@ -658,6 +661,11 @@ export function trackAllowedDynamicAccess(
     return
   } else if (hasMetadataRegex.test(componentStack)) {
     dynamicValidation.hasDynamicMetadata = true
+    // If there is a Suspense boundary above the Metadata boundary,
+    // allow dynamic access.
+    if (hasSuspenseAboveMetadataRegex.test(componentStack)) {
+      dynamicValidation.hasAllowedDynamic = true
+    }
     return
   } else if (hasViewportRegex.test(componentStack)) {
     dynamicValidation.hasDynamicViewport = true
