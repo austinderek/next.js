@@ -1183,6 +1183,7 @@ export default async function build(
             pagePaths: pagesPaths,
             pagesDir,
             appDir,
+            appDirOnly,
           })
         )
       NextBuildContext.mappedPages = mappedPages
@@ -1222,6 +1223,7 @@ export default async function build(
               pageExtensions: config.pageExtensions,
               pagesDir,
               appDir,
+              appDirOnly,
             })
           )
 
@@ -1235,6 +1237,7 @@ export default async function build(
               pageExtensions: config.pageExtensions,
               pagesDir,
               appDir,
+              appDirOnly,
             })
           )
 
@@ -1248,6 +1251,7 @@ export default async function build(
         pagesType: PAGE_TYPES.ROOT,
         pagesDir: pagesDir,
         appDir,
+        appDirOnly,
       })
       NextBuildContext.mappedRootPaths = mappedRootPaths
 
@@ -3420,6 +3424,9 @@ export default async function build(
               .traceAsyncFn(async () => {
                 file = `${file}.${ext}`
                 const orig = path.join(outdir, file)
+                if (!existsSync(orig)) {
+                  return
+                }
                 const pagePath = getPagePath(
                   originPage,
                   distDir,
