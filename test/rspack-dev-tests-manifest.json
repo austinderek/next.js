@@ -3142,10 +3142,10 @@
     "runtimeError": false
   },
   "test/development/basic/barrel-optimization/barrel-optimization-mui.test.ts": {
-    "passed": [],
-    "failed": [
+    "passed": [
       "Skipped in Turbopack optimizePackageImports - mui should support MUI"
     ],
+    "failed": [],
     "pending": [],
     "flakey": [],
     "runtimeError": false
@@ -4289,14 +4289,14 @@
   },
   "test/development/tsconfig-path-reloading/index.test.ts": {
     "passed": [
-      "tsconfig-path-reloading tsconfig should load with initial paths config correctly",
-      "tsconfig-path-reloading tsconfig should automatically fast refresh content when path is added without error"
+      "tsconfig-path-reloading tsconfig should automatically fast refresh content when path is added without error",
+      "tsconfig-path-reloading tsconfig should load with initial paths config correctly"
     ],
     "failed": [
-      "tsconfig-path-reloading tsconfig added after starting dev should recover from module not found when paths is updated",
-      "tsconfig-path-reloading tsconfig should recover from module not found when paths is updated",
+      "tsconfig-path-reloading tsconfig added after starting dev should automatically fast refresh content when path is added without error",
       "tsconfig-path-reloading tsconfig added after starting dev should load with initial paths config correctly",
-      "tsconfig-path-reloading tsconfig added after starting dev should automatically fast refresh content when path is added without error"
+      "tsconfig-path-reloading tsconfig added after starting dev should recover from module not found when paths is updated",
+      "tsconfig-path-reloading tsconfig should recover from module not found when paths is updated"
     ],
     "pending": [],
     "flakey": [],
@@ -5134,6 +5134,7 @@
       "app-root-param-getters - simple should allow reading root params in nested pages",
       "app-root-param-getters - simple should error when used in a route handler (until we implement it)",
       "app-root-param-getters - simple should error when used in a server action",
+      "app-root-param-getters - simple should not error when rerendering the page after a server action",
       "app-root-param-getters - simple should not generate getters for non-root params",
       "app-root-param-getters - simple should render the not found page without errors"
     ],
@@ -5632,6 +5633,7 @@
       "app dir - basic searchParams prop server component should have the correct search params on middleware rewrite",
       "app dir - basic searchParams prop server component should have the correct search params on rewrite",
       "app dir - basic server components Loading should render loading.js in browser for slow layout",
+      "app dir - basic server components Loading should render loading.js in browser for slow layout and page",
       "app dir - basic server components Loading should render loading.js in browser for slow page",
       "app dir - basic server components Loading should render loading.js in initial html for slow layout",
       "app dir - basic server components Loading should render loading.js in initial html for slow layout and page",
@@ -5646,7 +5648,6 @@
       "app dir - basic server components dynamic routes should only pass params that apply to the layout",
       "app dir - basic server components middleware should strip internal query parameters from requests to middleware for redirect",
       "app dir - basic server components middleware should strip internal query parameters from requests to middleware for rewrite",
-      "app dir - basic server components next/router should support router.back and router.forward",
       "app dir - basic server components should include client component layout with server component route should include it client-side",
       "app dir - basic server components should include client component layout with server component route should include it server-side",
       "app dir - basic server components should not serve .client.js as a path",
@@ -5690,7 +5691,7 @@
     ],
     "failed": [
       "app dir - basic <Link /> should navigate to pages dynamic route from pages page if it overlaps with an app page",
-      "app dir - basic server components Loading should render loading.js in browser for slow layout and page"
+      "app dir - basic server components next/router should support router.back and router.forward"
     ],
     "pending": [
       "app dir - basic HMR should HMR correctly when changing the component type",
@@ -5826,6 +5827,39 @@
   },
   "test/e2e/app-dir/build-size/index.test.ts": {
     "passed": ["app-dir build size should skip next dev for now"],
+    "failed": [],
+    "pending": [],
+    "flakey": [],
+    "runtimeError": false
+  },
+  "test/e2e/app-dir/bun-externals/bun-externals.test.ts": {
+    "passed": [
+      "app-dir - bun externals should handle bun builtins as external modules",
+      "app-dir - bun externals should handle bun builtins in edge runtime",
+      "app-dir - bun externals should handle bun builtins in route handlers",
+      "app-dir - bun externals should handle bun builtins in server actions"
+    ],
+    "failed": [],
+    "pending": [],
+    "flakey": [],
+    "runtimeError": false
+  },
+  "test/e2e/app-dir/cache-components-allow-otel-spans/cache-components-allow-otel-spans.test.ts": {
+    "passed": [
+      "hello-world should allow creating spans during cache component validation without triggering sync IO bailouts - inside a Cache Component - with prerendering the page",
+      "hello-world should allow creating spans during cache component validation without triggering sync IO bailouts - inside a Cache Component - without prerendering the page",
+      "hello-world should allow creating spans during cache component validation without triggering sync IO bailouts - inside a Server Component - with prerendering the page",
+      "hello-world should allow creating spans during cache component validation without triggering sync IO bailouts - inside a Server Component - without prerendering the page"
+    ],
+    "failed": [],
+    "pending": [],
+    "flakey": [],
+    "runtimeError": false
+  },
+  "test/e2e/app-dir/cache-components-create-component-tree/cache-components-create-component-tree.test.ts": {
+    "passed": [
+      "hello-world should not indicate there is an error when incidental math.random calls occur during component tree generation during dev"
+    ],
     "failed": [],
     "pending": [],
     "flakey": [],
@@ -7396,6 +7430,15 @@
       "app-dir - metadata-icons should re-insert the icons into head when icons are inserted in body during initial chunk",
       "app-dir - metadata-icons should render custom icons along with favicon in nested page",
       "app-dir - metadata-icons should render custom icons along with favicon in root page"
+    ],
+    "failed": [],
+    "pending": [],
+    "flakey": [],
+    "runtimeError": false
+  },
+  "test/e2e/app-dir/metadata-image-files/metadata-image-files.test.ts": {
+    "passed": [
+      "app dir - metadata image files should handle imported metadata images"
     ],
     "failed": [],
     "pending": [],
@@ -10067,6 +10110,17 @@
     "flakey": [],
     "runtimeError": false
   },
+  "test/e2e/app-dir/typed-routes/typed-routes.test.ts": {
+    "passed": [
+      "typed-routes should correctly convert custom route patterns from path-to-regexp to bracket syntax",
+      "typed-routes should generate route types correctly",
+      "typed-routes should update route types file when routes change"
+    ],
+    "failed": [],
+    "pending": [],
+    "flakey": [],
+    "runtimeError": false
+  },
   "test/e2e/app-dir/typeof-window/typeof-window.test.ts": {
     "passed": ["typeof-window should work using cheerio"],
     "failed": [],
@@ -10936,6 +10990,15 @@
       "edge-runtime uses edge-light import specifier for packages app-dir imports the correct module",
       "edge-runtime uses edge-light import specifier for packages pages import the correct module",
       "edge-runtime uses edge-light import specifier for packages pages/api endpoints import the correct module"
+    ],
+    "failed": [],
+    "pending": [],
+    "flakey": [],
+    "runtimeError": false
+  },
+  "test/e2e/error-handler-not-found-req-url/error-handler-not-found-req-url.test.ts": {
+    "passed": [
+      "error-handler-not-found-req-url should log the correct request url and asPath for not found _error page"
     ],
     "failed": [],
     "pending": [],
@@ -12482,6 +12545,7 @@
       "opentelemetry incoming context propagation app router should handle RSC with fetch",
       "opentelemetry incoming context propagation app router should handle RSC with fetch in RSC mode",
       "opentelemetry incoming context propagation app router should handle RSC with fetch on edge",
+      "opentelemetry incoming context propagation app router should handle error in RSC",
       "opentelemetry incoming context propagation app router should handle route handlers in app router",
       "opentelemetry incoming context propagation app router should handle route handlers in app router on edge",
       "opentelemetry incoming context propagation app router should propagate custom context without span",
@@ -12494,6 +12558,7 @@
       "opentelemetry root context app router should handle RSC with fetch",
       "opentelemetry root context app router should handle RSC with fetch in RSC mode",
       "opentelemetry root context app router should handle RSC with fetch on edge",
+      "opentelemetry root context app router should handle error in RSC",
       "opentelemetry root context app router should handle route handlers in app router",
       "opentelemetry root context app router should handle route handlers in app router on edge",
       "opentelemetry root context app router should propagate custom context without span",
@@ -12831,7 +12896,8 @@
       "styled-jsx should contain styled-jsx styles during SSR",
       "styled-jsx should render styles during CSR",
       "styled-jsx should render styles during CSR (AMP)",
-      "styled-jsx should render styles during SSR (AMP)"
+      "styled-jsx should render styles during SSR (AMP)",
+      "styled-jsx should render styles inside TypeScript"
     ],
     "failed": [],
     "pending": [],
@@ -13150,6 +13216,23 @@
       "useLinkStatus should remove pending state when server action triggers a redirect",
       "useLinkStatus should show pending state for the last link clicked when clicking multiple links in a row",
       "useLinkStatus should show pending state when navigating to the same path"
+    ],
+    "failed": [],
+    "pending": [],
+    "flakey": [],
+    "runtimeError": false
+  },
+  "test/e2e/use-router-with-rewrites/use-router-with-rewrites.test.ts": {
+    "passed": [
+      "use-router-with-rewrites rewrite to another segment should preserve current pathname when using Link with rewrites on dynamic route",
+      "use-router-with-rewrites rewrite to another segment should preserve current pathname when using useRouter.push with rewrites on dynamic route",
+      "use-router-with-rewrites rewrite to another segment should preserve current pathname when using useRouter.replace with rewrites on dynamic route",
+      "use-router-with-rewrites rewrite to same segment should preserve current pathname when using Link with rewrites on dynamic route",
+      "use-router-with-rewrites rewrite to same segment should preserve current pathname when using useRouter.push with rewrites on dynamic route",
+      "use-router-with-rewrites rewrite to same segment should preserve current pathname when using useRouter.replace with rewrites on dynamic route",
+      "use-router-with-rewrites should preserve current pathname when using Link with rewrites",
+      "use-router-with-rewrites should preserve current pathname when using useRouter.push with rewrites",
+      "use-router-with-rewrites should preserve current pathname when using useRouter.replace with rewrites"
     ],
     "failed": [],
     "pending": [],
@@ -22509,6 +22592,17 @@
       "Handle new URL asset references in next dev should render the /static page",
       "Handle new URL asset references in next dev should respond on basename api",
       "Handle new URL asset references in next dev should respond on size api"
+    ],
+    "failed": [],
+    "pending": [],
+    "flakey": [],
+    "runtimeError": false
+  },
+  "test/integration/webpack-bun-externals/test/index.test.js": {
+    "passed": [
+      "Webpack - Bun Externals should externalize Bun builtins in server bundles",
+      "Webpack - Bun Externals should not bundle Bun module implementations",
+      "Webpack - Bun Externals should successfully build with Bun module imports"
     ],
     "failed": [],
     "pending": [],
