@@ -736,23 +736,20 @@ export function throwIfDisallowedDynamic(
   dynamicValidation: DynamicValidationState,
   serverDynamic: DynamicTrackingState
 ): void {
+  if (serverDynamic.syncDynamicErrorWithStack) {
+    logDisallowedDynamicError(
+      workStore,
+      serverDynamic.syncDynamicErrorWithStack
+    )
+    throw new StaticGenBailoutError()
+  }
+
   if (prelude !== PreludeState.Full) {
     if (dynamicValidation.hasSuspenseAboveBody) {
       // This route has opted into allowing fully dynamic rendering
       // by including a Suspense boundary above the body. In this case
       // a lack of a shell is not considered disallowed so we simply return
       return
-    }
-
-    if (serverDynamic.syncDynamicErrorWithStack) {
-      // There is no shell and the server did something sync dynamic likely
-      // leading to an early termination of the prerender before the shell
-      // could be completed. We terminate the build/validating render.
-      logDisallowedDynamicError(
-        workStore,
-        serverDynamic.syncDynamicErrorWithStack
-      )
-      throw new StaticGenBailoutError()
     }
 
     // We didn't have any sync bailouts but there may be user code which
