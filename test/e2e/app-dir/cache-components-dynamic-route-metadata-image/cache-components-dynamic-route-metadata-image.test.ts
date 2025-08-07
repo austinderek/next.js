@@ -1,7 +1,7 @@
 import { nextTestSetup } from 'e2e-utils'
 
 describe('cache-components-metadata-dynamic-image', () => {
-  const { next } = nextTestSetup({
+  const { next, isNextDev } = nextTestSetup({
     files: __dirname,
   })
 
@@ -15,16 +15,20 @@ describe('cache-components-metadata-dynamic-image', () => {
   })
 
   it('should have correct headers for dynamic route metadata image', async () => {
-    const res = await next.fetch('/123/icon.png')
-    expect(res.headers.get('content-type')).toBe('image/png')
-    expect(res.headers.get('cache-control')).toBe(
-      'public, immutable, no-transform, max-age=31536000'
+    const iconRes = await next.fetch('/123/icon.png')
+    expect(iconRes.headers.get('content-type')).toBe('image/png')
+    expect(iconRes.headers.get('cache-control')).toBe(
+      isNextDev
+        ? 'no-cache, no-store'
+        : 'public, immutable, no-transform, max-age=31536000'
     )
 
     const appleIconRes = await next.fetch('/123/apple-icon')
     expect(appleIconRes.headers.get('content-type')).toBe('image/png')
     expect(appleIconRes.headers.get('cache-control')).toBe(
-      'public, immutable, no-transform, max-age=31536000'
+      isNextDev
+        ? 'no-cache, no-store'
+        : 'public, immutable, no-transform, max-age=31536000'
     )
   })
 })
