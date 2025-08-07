@@ -661,8 +661,10 @@ export function trackAllowedDynamicAccess(
     return
   } else if (hasMetadataRegex.test(componentStack)) {
     dynamicValidation.hasDynamicMetadata = true
-    // If there is a Suspense boundary above the Metadata boundary,
-    // allow dynamic access.
+    // Metadata files inside dynamic routes need to resolve their params to
+    // insert tags into the head with resolved href. When streaming metadata,
+    // we expect the Suspense boundary to be above the Metadata boundary which
+    // allows metadata to access the dynamic params.
     if (hasSuspenseAboveMetadataRegex.test(componentStack)) {
       dynamicValidation.hasAllowedDynamic = true
     }
