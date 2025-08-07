@@ -48,8 +48,9 @@ export async function loadEntrypoint(
 
   return bindings.expandNextJsTemplate(
     content,
-    path.join(TEMPLATE_SRC_FOLDER, `${entrypoint}.js`),
-    PACKAGE_ROOT,
+    // Ensure that we use unix-style path separators for the import paths
+    path.join(TEMPLATE_SRC_FOLDER, `${entrypoint}.js`).replace(/\\/g, '/'),
+    PACKAGE_ROOT.replace(/\\/g, '/'),
     replacements,
     injections ?? {},
     imports ?? {}
