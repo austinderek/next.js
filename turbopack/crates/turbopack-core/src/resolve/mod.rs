@@ -1392,7 +1392,7 @@ async fn find_package(
                     for name in names.iter() {
                         let fs_path = lookup_path.join(name)?;
                         if let Some(fs_path) = dir_exists(fs_path, &mut affecting_sources).await? {
-                            let fs_path = fs_path.join(&package_name.clone())?;
+                            let fs_path = fs_path.join(&package_name)?;
                             if let Some(fs_path) =
                                 dir_exists(fs_path.clone(), &mut affecting_sources).await?
                             {
@@ -1431,7 +1431,7 @@ async fn find_package(
                     if excluded_extensions.contains(extension) {
                         continue;
                     }
-                    let package_file = package_dir.append(&extension.clone())?;
+                    let package_file = package_dir.append(extension)?;
                     if let Some(package_file) = exists(package_file, &mut affecting_sources).await?
                     {
                         packages.push(FindPackageItem::PackageFile(package_file));

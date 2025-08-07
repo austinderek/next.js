@@ -291,8 +291,8 @@ async fn prepare_test(resource: RcStr) -> Result<Vc<PreparedTest>> {
         resource_path.display()
     ))?;
     let relative_path: RcStr = sys_to_unix(relative_path.to_str().unwrap()).into();
-    let path = root_fs.root().await?.join(&relative_path.clone())?;
-    let project_path = project_root.join(&relative_path.clone())?;
+    let path = root_fs.root().await?.join(&relative_path)?;
+    let project_path = project_root.join(&relative_path)?;
     let tests_path = project_fs
         .root()
         .await?

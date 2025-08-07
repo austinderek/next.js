@@ -1631,7 +1631,7 @@ pub async fn read_matches(
                                     prefix.pop();
                                 }
                                 if let Some(pos) = pat.match_position(&prefix) {
-                                    let fs_path = lookup_dir.join(&key.clone())?;
+                                    let fs_path = lookup_dir.join(key)?;
                                     if let LinkContent::Link { link_type, .. } =
                                         &*fs_path.read_link().await?
                                     {
@@ -1653,7 +1653,7 @@ pub async fn read_matches(
                                 }
                                 prefix.push('/');
                                 if let Some(pos) = pat.match_position(&prefix) {
-                                    let fs_path = lookup_dir.join(&key.clone())?;
+                                    let fs_path = lookup_dir.join(key)?;
                                     if let LinkContent::Link { link_type, .. } =
                                         &*fs_path.read_link().await?
                                         && link_type.contains(LinkType::DIRECTORY)
@@ -1665,7 +1665,7 @@ pub async fn read_matches(
                                     }
                                 }
                                 if let Some(pos) = pat.could_match_position(&prefix) {
-                                    let fs_path = lookup_dir.join(&key.clone())?;
+                                    let fs_path = lookup_dir.join(key)?;
                                     if let LinkContent::Link { link_type, .. } =
                                         &*fs_path.read_link().await?
                                         && link_type.contains(LinkType::DIRECTORY)
