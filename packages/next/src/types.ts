@@ -373,7 +373,7 @@ export interface PageModule<Params = {}> {
   ) => Metadata | PromiseLike<Metadata>
   generateStaticParams?: () => Params[] | PromiseLike<Params[]>
   metadata?: Metadata
-  default: React.Component<PageProps<Params>>
+default: React.ComponentType<PageProps<Params>>
 }
 
 declare global {
