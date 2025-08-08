@@ -46,6 +46,7 @@ import type {
 import {
   doesStaticSegmentAppearInURL,
   getCacheKeyForDynamicParam,
+  getParamValueFromCacheKey,
   getRenderedPathname,
   getRenderedSearch,
   parseDynamicParamFromURLPart,
@@ -975,12 +976,7 @@ function convertTreePrefetchToRouteTree(
           value: childParamValue,
           type: childParamType,
         }
-        childSegment = [
-          childParamName,
-          childParamKey,
-          childParamType,
-          childParamValue,
-        ]
+        childSegment = [childParamName, childParamKey, childParamType]
         childDoesAppearInURL = true
       } else {
         childSegment = childParamName
@@ -1082,7 +1078,9 @@ function convertFlightRouterStateToRouteTree(
   let segment: FlightRouterStateSegment
   let param: RouteParam | null = null
   if (Array.isArray(originalSegment)) {
-    const paramValue = originalSegment[3]
+    const paramCacheKey = originalSegment[1]
+    const paramType = originalSegment[2]
+    const paramValue = getParamValueFromCacheKey(paramCacheKey, paramType)
     param = {
       name: originalSegment[0],
       value: paramValue === undefined ? null : paramValue,
@@ -1647,12 +1645,8 @@ function writeDynamicTreeResponseIntoCache(
   // Get the URL that was used to render the target page. This may be different
   // from the URL in the request URL, if the page was rewritten.
   const renderedSearch = getRenderedSearch(response)
-  const renderedPathname = getRenderedPathname(response)
 
-  const normalizedFlightDataResult = normalizeFlightData(
-    serverData.f,
-    renderedPathname
-  )
+  const normalizedFlightDataResult = normalizeFlightData(serverData.f)
   if (
     // A string result means navigating to this route will result in an
     // MPA navigation.
@@ -1759,11 +1753,7 @@ function writeDynamicRenderResponseIntoCache(
     return null
   }
 
-  // Get the URL that was used to render the target page. This may be different
-  // from the URL in the request URL, if the page was rewritten.
-  const renderedPathname = getRenderedPathname(response)
-
-  const flightDatas = normalizeFlightData(serverData.f, renderedPathname)
+  const flightDatas = normalizeFlightData(serverData.f)
   if (typeof flightDatas === 'string') {
     // This means navigating to this route will result in an MPA navigation.
     // TODO: We should cache this, too, so that the MPA navigation is immediate.
