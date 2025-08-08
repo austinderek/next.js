@@ -5,6 +5,9 @@ import { useUntrackedPathname } from './navigation-untracked'
 import { isNextRouterError } from './is-next-router-error'
 import { handleHardNavError } from './nav-failure-handler'
 import { HandleISRError } from './handle-isr-error'
+import { isBot } from '../../shared/lib/router/utils/is-bot'
+
+const isBrowser = typeof window !== 'undefined'
 
 export type ErrorComponent = React.ComponentType<{
   error: Error
@@ -93,7 +96,10 @@ export class ErrorBoundaryHandler extends React.Component<
 
   // Explicit type is needed to avoid the generated `.d.ts` having a wide return type that could be specific to the `@types/react` version.
   render(): React.ReactNode {
-    if (this.state.error) {
+    const isUserBot = isBrowser && isBot(window.navigator.userAgent)
+
+    // Always render children for consistency, but conditionally render error UI
+    if (this.state.error && !isUserBot) {
       return (
         <>
           <HandleISRError error={this.state.error} />
