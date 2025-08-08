@@ -44,7 +44,27 @@ In addition, to reduce bundle size, Next.js will only load these polyfills for b
 If your own code or any external npm dependencies require features not supported by your target browsers (such as IE 11), you need to add polyfills yourself.
 
 <PagesOnly>
+
 In this case, you should add a top-level import for the **specific polyfill** you need in your [Custom `<App>`](/docs/pages/building-your-application/routing/custom-app) or the individual component.
+
+```tsx filename="pages/_app.tsx" switcher
+import './polyfills'
+
+import type { AppProps } from 'next/app'
+
+export default function MyApp({ Component, pageProps }: AppProps) {
+  return <Component {...pageProps} />
+}
+```
+
+```jsx filename="pages/_app.jsx" switcher
+import './polyfills'
+
+export default function MyApp({ Component, pageProps }) {
+  return <Component {...pageProps} />
+}
+```
+
 </PagesOnly>
 
 <AppOnly>
