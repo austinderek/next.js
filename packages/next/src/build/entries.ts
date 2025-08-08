@@ -544,11 +544,12 @@ export async function createPagesMapping({
           ),
         }),
         // App router default 500.html entry
-        ...(appDirOnly && {
-          [UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY]: require.resolve(
-            'next/dist/client/components/builtin/app-error'
-          ),
-        }),
+        ...(appDirOnly &&
+          !isDev && {
+            [UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY]: require.resolve(
+              'next/dist/client/components/builtin/app-error'
+            ),
+          }),
         ...pages,
       }
     }
@@ -567,13 +568,12 @@ export async function createPagesMapping({
 
       return {
         // Don't add default pages entries if this is an app-router-only build
-        ...(hasPagesRoutes &&
-          !appDirOnly && {
-            '/_app': `${root}/_app`,
-            '/_error': `${root}/_error`,
-            '/_document': `${root}/_document`,
-            ...pages,
-          }),
+        ...((isDev || ((hasPagesRoutes || !appDir) && !appDirOnly)) && {
+          '/_app': `${root}/_app`,
+          '/_error': `${root}/_error`,
+          '/_document': `${root}/_document`,
+          ...pages,
+        }),
       }
     }
     default: {
