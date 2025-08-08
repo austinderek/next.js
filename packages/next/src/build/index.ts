@@ -1357,8 +1357,11 @@ export default async function build(
       const hasCustomErrorPage =
         mappedPages['/_error']?.startsWith(PAGES_DIR_ALIAS)
 
-      // Check if there are any user pages (non-reserved pages) in the pages router
       const hasAppDir = !!appDir
+      // Check if there are any user pages (non-reserved pages) in the pages router
+      const hasUserPagesRoutes = Object.keys(mappedPages).some(
+        (route) => !isReservedPage(route)
+      )
 
       if (hasPublicDir) {
         const hasPublicUnderScoreNextDir = existsSync(
@@ -1819,7 +1822,7 @@ export default async function build(
             namedExports: [],
             isNextImageImported: true,
             hasSsrAmpPages: !!pagesDir,
-            hasNonStaticErrorPage: hasAppDir,
+            hasNonStaticErrorPage: hasUserPagesRoutes,
           }
         }
 
@@ -1834,7 +1837,6 @@ export default async function build(
         const errorPageHasCustomGetInitialProps =
           nonStaticErrorPageSpan.traceAsyncFn(
             async () =>
-              hasAppDir &&
               hasCustomErrorPage &&
               (await worker.hasCustomGetInitialProps({
                 page: '/_error',
@@ -1847,7 +1849,6 @@ export default async function build(
 
         const errorPageStaticResult = nonStaticErrorPageSpan.traceAsyncFn(
           async () =>
-            hasAppDir &&
             hasCustomErrorPage &&
             worker.isPageStatic({
               dir,
@@ -1870,7 +1871,7 @@ export default async function build(
 
         const appPageToCheck = '/_app'
 
-        const customAppGetInitialPropsPromise = hasAppDir
+        const customAppGetInitialPropsPromise = hasUserPagesRoutes
           ? worker.hasCustomGetInitialProps({
               page: appPageToCheck,
               distDir,
@@ -1880,7 +1881,7 @@ export default async function build(
             })
           : Promise.resolve(false)
 
-        const namedExportsPromise = hasAppDir
+        const namedExportsPromise = hasUserPagesRoutes
           ? worker.getDefinedNamedExports({
               page: appPageToCheck,
               distDir,
@@ -3605,10 +3606,11 @@ export default async function build(
             await moveExportedPage('/_error', '/500', '/500', false, 'html')
           }
 
-          // If there's /global-error inside app and no user pages in pages router, use app router global error for 500
+          // If there's app router and no pages router, use app router built-in 500.html
           if (
             hasStaticAppGlobalError &&
-            !hasAppDir &&
+            hasAppDir &&
+            !pagesDir &&
             mappedAppPages &&
             Object.keys(mappedAppPages).length > 0
           ) {
