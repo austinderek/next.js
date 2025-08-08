@@ -186,6 +186,12 @@ async function exportAppImpl(
       continue
     }
 
+    // For App Router applications, skip pages from the Pages Router manifest
+    // since App Router has its own routing and error handling mechanisms
+    if (appRoutePathManifest && (page === '/404' || page === '/500')) {
+      continue
+    }
+
     // iSSG pages that are dynamic should not export templated version by
     // default. In most cases, this would never work. There is no server that
     // could run `getStaticProps`. If users make their page work lazily, they
@@ -448,14 +454,18 @@ async function exportAppImpl(
   if (!options.buildExport) {
     // only add missing /404 if not specified in `exportPathMap`
     if (!exportPathMap['/404']) {
-      exportPathMap['/404'] = { page: '/_error' }
+      // For App Router, don't create a 404 page that points to /_error (Pages Router concept)
+      // App Router handles not-found through its own mechanism
+      if (!appRoutePathManifest) {
+        exportPathMap['/404'] = { page: '/_error' }
+      }
     }
 
     /**
      * exports 404.html for backwards compat
      * E.g. GitHub Pages, GitLab Pages, Cloudflare Pages, Netlify
      */
-    if (!exportPathMap['/404.html']) {
+    if (!exportPathMap['/404.html'] && exportPathMap['/404']) {
       // alias /404.html to /404 to be compatible with custom 404 / _error page
       exportPathMap['/404.html'] = exportPathMap['/404']
     }
