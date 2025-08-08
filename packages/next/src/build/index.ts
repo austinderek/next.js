@@ -1358,9 +1358,7 @@ export default async function build(
         mappedPages['/_error']?.startsWith(PAGES_DIR_ALIAS)
 
       // Check if there are any user pages (non-reserved pages) in the pages router
-      const hasUserPagesRoutes = Object.keys(mappedPages).some(
-        (route) => !isReservedPage(route)
-      )
+      const hasAppDir = !!appDir
 
       if (hasPublicDir) {
         const hasPublicUnderScoreNextDir = existsSync(
@@ -1821,7 +1819,7 @@ export default async function build(
             namedExports: [],
             isNextImageImported: true,
             hasSsrAmpPages: !!pagesDir,
-            hasNonStaticErrorPage: hasUserPagesRoutes,
+            hasNonStaticErrorPage: hasAppDir,
           }
         }
 
@@ -1836,7 +1834,7 @@ export default async function build(
         const errorPageHasCustomGetInitialProps =
           nonStaticErrorPageSpan.traceAsyncFn(
             async () =>
-              hasUserPagesRoutes &&
+              hasAppDir &&
               hasCustomErrorPage &&
               (await worker.hasCustomGetInitialProps({
                 page: '/_error',
@@ -1849,7 +1847,7 @@ export default async function build(
 
         const errorPageStaticResult = nonStaticErrorPageSpan.traceAsyncFn(
           async () =>
-            hasUserPagesRoutes &&
+            hasAppDir &&
             hasCustomErrorPage &&
             worker.isPageStatic({
               dir,
@@ -1872,7 +1870,7 @@ export default async function build(
 
         const appPageToCheck = '/_app'
 
-        const customAppGetInitialPropsPromise = hasUserPagesRoutes
+        const customAppGetInitialPropsPromise = hasAppDir
           ? worker.hasCustomGetInitialProps({
               page: appPageToCheck,
               distDir,
@@ -1882,7 +1880,7 @@ export default async function build(
             })
           : Promise.resolve(false)
 
-        const namedExportsPromise = hasUserPagesRoutes
+        const namedExportsPromise = hasAppDir
           ? worker.getDefinedNamedExports({
               page: appPageToCheck,
               distDir,
@@ -2814,13 +2812,13 @@ export default async function build(
                 })
               })
 
-              if (useStaticPages404) {
+              if (useStaticPages404 && !hasAppDir) {
                 defaultMap['/404'] = {
                   page: hasPages404 ? '/404' : '/_error',
                 }
               }
 
-              if (useDefaultStatic500 && hasUserPagesRoutes) {
+              if (useDefaultStatic500 && !hasAppDir) {
                 defaultMap['/500'] = {
                   page: '/_error',
                 }
@@ -2874,7 +2872,7 @@ export default async function build(
                     // skip fallback generation for SSG pages without fallback mode
                     if (isSsg && isDynamic && !isFallback) continue
                     // skip generating localized versions of error pages like /500
-                    if (page === '/500') continue
+                    // if (page === '/500') continue
                     const outputPath = `/${locale}${page === '/' ? '' : page}`
 
                     defaultMap[outputPath] = {
@@ -3598,19 +3596,19 @@ export default async function build(
             await moveExportedAppNotFoundTo404()
           } else {
             // Only move /404 to /404 when there is no custom 404 as in that case we don't know about the 404 page
-            if (!hasPages404 && !hasApp404 && useStaticPages404) {
+            if (!hasPages404 && !hasApp404 && useStaticPages404 && hasAppDir) {
               await moveExportedPage('/_error', '/404', '/404', false, 'html')
             }
           }
 
-          if (useDefaultStatic500 && hasUserPagesRoutes) {
+          if (useDefaultStatic500 && hasAppDir) {
             await moveExportedPage('/_error', '/500', '/500', false, 'html')
           }
 
           // If there's /global-error inside app and no user pages in pages router, use app router global error for 500
           if (
             hasStaticAppGlobalError &&
-            !hasUserPagesRoutes &&
+            !hasAppDir &&
             mappedAppPages &&
             Object.keys(mappedAppPages).length > 0
           ) {
