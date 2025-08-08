@@ -502,7 +502,7 @@ impl ModuleOptions {
                 };
 
                 rules.push(ModuleRule::new(
-                    RuleCondition::All(vec![
+                    RuleCondition::Any(vec![
                         RuleCondition::All(vec![
                             RuleCondition::Any(vec![
                                 RuleCondition::ResourcePathEndsWith(".css".to_string()),
