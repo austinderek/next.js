@@ -20,6 +20,8 @@ describe('500-page app-router-only', () => {
     // Not use pages router to generate 500.html
     expect(html).toContain('__next_error__')
     expect(html).toContain('Internal Server Error.')
+    // global-error is not used in app router 500.html
+    expect(html).not.toContain('app-router-global-error')
   })
 
   it('should not contain pages router routes default assets', async () => {
