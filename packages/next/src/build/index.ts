@@ -2814,7 +2814,7 @@ export default async function build(
                 })
               })
 
-              if (useStaticPages404 && hasUserPagesRoutes) {
+              if (useStaticPages404) {
                 defaultMap['/404'] = {
                   page: hasPages404 ? '/404' : '/_error',
                 }
@@ -2823,19 +2823,6 @@ export default async function build(
               if (useDefaultStatic500 && hasUserPagesRoutes) {
                 defaultMap['/500'] = {
                   page: '/_error',
-                }
-              }
-
-              // If there's /global-error inside app and no user pages in pages router, use app router global error for 500
-              if (
-                hasStaticAppGlobalError &&
-                !hasUserPagesRoutes &&
-                mappedAppPages &&
-                Object.keys(mappedAppPages).length > 0
-              ) {
-                defaultMap['/500'] = {
-                  page: UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY,
-                  _isAppDir: true,
                 }
               }
 
@@ -2886,6 +2873,8 @@ export default async function build(
                   for (const locale of i18n.locales) {
                     // skip fallback generation for SSG pages without fallback mode
                     if (isSsg && isDynamic && !isFallback) continue
+                    // skip generating localized versions of error pages like /500
+                    if (page === '/500') continue
                     const outputPath = `/${locale}${page === '/' ? '' : page}`
 
                     defaultMap[outputPath] = {

@@ -448,11 +448,7 @@ async function exportAppImpl(
   if (!options.buildExport) {
     // only add missing /404 if not specified in `exportPathMap`
     if (!exportPathMap['/404']) {
-      // For App Router, don't create a 404 page that points to /_error (Pages Router concept)
-      // App Router handles not-found through its own mechanism
-      if (!appRoutePathManifest) {
-        exportPathMap['/404'] = { page: '/_error' }
-      }
+      exportPathMap['/404'] = { page: '/_error' }
     }
 
     /**
