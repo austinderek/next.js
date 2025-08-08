@@ -186,12 +186,6 @@ async function exportAppImpl(
       continue
     }
 
-    // For App Router applications, skip pages from the Pages Router manifest
-    // since App Router has its own routing and error handling mechanisms
-    if (appRoutePathManifest && (page === '/404' || page === '/500')) {
-      continue
-    }
-
     // iSSG pages that are dynamic should not export templated version by
     // default. In most cases, this would never work. There is no server that
     // could run `getStaticProps`. If users make their page work lazily, they
@@ -770,7 +764,7 @@ async function exportAppImpl(
   }
 
   // copy prerendered routes to outDir
-  if (!options.buildExport && prerenderManifest) {
+  if (prerenderManifest) {
     await Promise.all(
       Object.keys(prerenderManifest.routes).map(async (unnormalizedRoute) => {
         // Skip handling /_not-found route, it will copy the 404.html file later
