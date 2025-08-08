@@ -62,7 +62,7 @@ export default function ({
           let callExpression = refPath.parentPath
 
           if (
-            callExpression.isMemberExpression() &&
+            callExpression?.isMemberExpression() &&
             callExpression.node.computed === false
           ) {
             const property = callExpression.get('property')
@@ -74,14 +74,11 @@ export default function ({
             }
           }
 
-          if (!callExpression.isCallExpression()) return
+          if (!callExpression?.isCallExpression()) return
 
-          const callExpression_ =
-            callExpression as NodePath<BabelTypes.CallExpression>
-
-          let args = callExpression_.get('arguments')
+          let args = callExpression.get('arguments')
           if (args.length > 2) {
-            throw callExpression_.buildCodeFrameError(
+            throw callExpression.buildCodeFrameError(
               'next/dynamic only accepts 2 arguments'
             )
           }
@@ -97,10 +94,10 @@ export default function ({
             options = args[0]
           } else {
             if (!args[1]) {
-              callExpression_.node.arguments.push(t.objectExpression([]))
+              callExpression.node.arguments.push(t.objectExpression([]))
             }
             // This is needed as the code is modified above
-            args = callExpression_.get('arguments')
+            args = callExpression.get('arguments')
             loader = args[0]
             options = args[1]
           }
