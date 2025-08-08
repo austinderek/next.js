@@ -147,6 +147,7 @@ function deduplicateCSSImportsForEntry(mergedCSSimports: CssImports) {
 
     const indexA = POSSIBLE_SHARED_CONVENTIONS.indexOf(aName)
     const indexB = POSSIBLE_SHARED_CONVENTIONS.indexOf(bName)
+
     if (indexA === -1) return 1
     if (indexB === -1) return -1
     return indexA - indexB
@@ -349,11 +350,13 @@ export class FlightClientEntryPlugin {
         const isAppRouterBuiltinPage = isAppBuiltinPage(entryRequest)
 
         // Next.js internals are put into a separate entry.
-        if (!isAbsoluteRequest && !isAppRouterBuiltinPage) {
+        if (!isAbsoluteRequest) {
           Object.keys(clientComponentImports).forEach(
             (value) => (internalClientComponentEntryImports[value] = new Set())
           )
-          continue
+          if (!isAppRouterBuiltinPage) {
+            continue
+          }
         }
 
         // TODO-APP: Enable these lines. This ensures no entrypoint is created for layout/page when there are no client components.
