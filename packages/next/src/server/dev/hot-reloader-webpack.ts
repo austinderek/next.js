@@ -650,7 +650,7 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
             ),
             pagesDir: this.pagesDir,
             appDir: this.appDir,
-            appDirOnly: !!this.appDir && !this.pagesDir,
+            appDirOnly: Boolean(this.appDir && !this.pagesDir),
           })
         )
 

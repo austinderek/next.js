@@ -1006,12 +1006,6 @@ export default async function build(
         pages: typeof pagesDir === 'string',
       }
 
-      // If no pages directory exists, this is an app-router-only build
-      if (!enabledDirectories.pages && enabledDirectories.app) {
-        appDirOnly = true
-        NextBuildContext.appDirOnly = appDirOnly
-      }
-
       // Generate a random encryption key for this build.
       // This key is used to encrypt cross boundary values and can be used to generate hashes.
       const encryptionKey = await generateEncryptionKeyBase64({
@@ -1222,7 +1216,7 @@ export default async function build(
               pageExtensions: config.pageExtensions,
               pagesDir,
               appDir,
-              appDirOnly: Boolean(appDirOnly || pagesDir),
+              appDirOnly: Boolean(appDirOnly || !pagesDir),
             })
           )
 
