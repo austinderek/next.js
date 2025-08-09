@@ -1073,6 +1073,24 @@ export async function isPageStatic({
   buildId: string
   sriEnabled: boolean
 }): Promise<PageIsStaticResult> {
+  // For Turbopack, skip page data collection for synthetic _global-error routes
+  // as they point to built-in components that aren't resolvable during static generation
+  if (process.env.TURBOPACK && page === '/_global-error') {
+    return {
+      isStatic: true,
+      isRoutePPREnabled: false,
+      isHybridAmp: false,
+      isAmpOnly: false,
+      prerenderFallbackMode: undefined,
+      prerenderedRoutes: undefined,
+      rootParamKeys: undefined,
+      hasStaticProps: false,
+      hasServerProps: false,
+      isNextImageImported: false,
+      appConfig: {},
+    }
+  }
+
   await createIncrementalCache({
     cacheHandler,
     cacheHandlers,

@@ -401,7 +401,7 @@ describe('Telemetry CLI', () => {
         expect(event1).toMatch(/"ssrPageCount": 3/)
         expect(event1).toMatch(/"staticPageCount": 5/)
         expect(event1).toMatch(/"totalPageCount": 12/)
-        expect(event1).toMatch(/"totalAppPagesCount": 3/)
+        expect(event1).toMatch(/"totalAppPagesCount": 4/)
         expect(event1).toMatch(/"staticAppPagesCount": 3/)
         expect(event1).toMatch(/"serverAppPagesCount": 0/)
         expect(event1).toMatch(/"edgeRuntimeAppCount": 0/)

@@ -1527,8 +1527,21 @@ async fn directory_tree_to_entrypoints_internal_untraced(
             );
         }
 
-        // Create production global error page
-        if !next_mode.await?.is_development() {
+        // Create production global error page only in build mode when there are no Pages routes.
+        // This aligns with webpack: default Pages entries (including /_error) are only added when
+        // the build isn't app-only. If the build is app-only (no user pages/api), we should still
+        // expose the app global error so runtime errors render, but we shouldn't emit it otherwise.
+        if matches!(*next_mode.await?, NextMode::Build)
+            && !crate::pages_structure::find_pages_structure(
+                app_dir.parent(),
+                app_dir.clone(),
+                // Use the default page extensions from config defaults
+                Vc::cell(crate::next_config::NextConfig::default().page_extensions),
+                next_mode,
+            )
+            .await?
+            .has_user_pages
+        {
             // Use built-in global-error.js to create a `_global-error/page` route.
             let global_error_tree = AppPageLoaderTree {
                 page: app_page.clone(),
