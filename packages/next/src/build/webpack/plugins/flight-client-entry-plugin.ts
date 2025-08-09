@@ -833,6 +833,7 @@ export class FlightClientEntryPlugin {
   ] {
     const bundler = getWebpackBundler()
     let shouldInvalidate = false
+
     const modules = Object.keys(clientImports)
       .sort((a, b) => (regexCSS.test(b) ? 1 : a.localeCompare(b)))
       .map((clientImportPath) => ({

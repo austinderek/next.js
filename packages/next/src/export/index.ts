@@ -498,7 +498,9 @@ async function exportAppImpl(
   }
 
   if (allExportPaths.length === 0) {
-    return null
+    if (!prerenderManifest) {
+      return null
+    }
   }
 
   if (fallbackEnabledPages.size > 0) {
@@ -646,44 +648,53 @@ async function exportAppImpl(
     initialPhaseExportPaths = allExportPaths
   }
 
-  const progress = createProgress(
-    initialPhaseExportPaths.length + finalPhaseExportPaths.length,
-    options.statusMessage || 'Exporting'
-  )
+  const totalExportPaths =
+    initialPhaseExportPaths.length + finalPhaseExportPaths.length
+  let worker: StaticWorker | null = null
+  let results: ExportPagesResult = []
 
-  const worker = createStaticWorker(nextConfig, {
-    debuggerPortOffset: getNextBuildDebuggerPortOffset({ kind: 'export-page' }),
-    progress,
-  })
-
-  const results = await exportPagesInBatches(worker, initialPhaseExportPaths)
-
-  if (finalPhaseExportPaths.length > 0) {
-    const renderResumeDataCachesByPage: Record<string, string> = {}
-
-    for (const { page, result } of results) {
-      if (!result) {
-        continue
-      }
-
-      if ('renderResumeDataCache' in result && result.renderResumeDataCache) {
-        // The last RDC for each page is used. We only need one. It should have
-        // all the entries that the fallback shell also needs. We don't need to
-        // merge them per page.
-        renderResumeDataCachesByPage[page] = result.renderResumeDataCache
-        // Remove the RDC string from the result so that it can be garbage
-        // collected, when there are more results for the same page.
-        result.renderResumeDataCache = undefined
-      }
-    }
-
-    const finalPhaseResults = await exportPagesInBatches(
-      worker,
-      finalPhaseExportPaths,
-      renderResumeDataCachesByPage
+  if (totalExportPaths > 0) {
+    const progress = createProgress(
+      totalExportPaths,
+      options.statusMessage || 'Exporting'
     )
 
-    results.push(...finalPhaseResults)
+    worker = createStaticWorker(nextConfig, {
+      debuggerPortOffset: getNextBuildDebuggerPortOffset({
+        kind: 'export-page',
+      }),
+      progress,
+    })
+
+    results = await exportPagesInBatches(worker, initialPhaseExportPaths)
+
+    if (finalPhaseExportPaths.length > 0) {
+      const renderResumeDataCachesByPage: Record<string, string> = {}
+
+      for (const { page, result } of results) {
+        if (!result) {
+          continue
+        }
+
+        if ('renderResumeDataCache' in result && result.renderResumeDataCache) {
+          // The last RDC for each page is used. We only need one. It should have
+          // all the entries that the fallback shell also needs. We don't need to
+          // merge them per page.
+          renderResumeDataCachesByPage[page] = result.renderResumeDataCache
+          // Remove the RDC string from the result so that it can be garbage
+          // collected, when there are more results for the same page.
+          result.renderResumeDataCache = undefined
+        }
+      }
+
+      const finalPhaseResults = await exportPagesInBatches(
+        worker,
+        finalPhaseExportPaths,
+        renderResumeDataCachesByPage
+      )
+
+      results.push(...finalPhaseResults)
+    }
   }
 
   let hadValidationError = false
@@ -766,9 +777,47 @@ async function exportAppImpl(
   }
 
   // copy prerendered routes to outDir
-  if (!options.buildExport && prerenderManifest) {
+  if (prerenderManifest) {
     await Promise.all(
       Object.keys(prerenderManifest.routes).map(async (unnormalizedRoute) => {
+        // Special handling: map app /_not-found to 404.html (and 404/index.html when trailingSlash)
+        if (unnormalizedRoute === '/_not-found') {
+          const { srcRoute } = prerenderManifest!.routes[unnormalizedRoute]
+          const appPageName = mapAppRouteToPage.get(srcRoute || '')
+          const pageName = appPageName || srcRoute || unnormalizedRoute
+          const isAppPath = Boolean(appPageName)
+          const route = normalizePagePath(unnormalizedRoute)
+
+          const pagePath = getPagePath(pageName, distDir, undefined, isAppPath)
+          const distPagesDir = join(
+            pagePath,
+            pageName
+              .slice(1)
+              .split('/')
+              .map(() => '..')
+              .join('/')
+          )
+
+          const orig = join(distPagesDir, route)
+          const htmlSrc = `${orig}.html`
+
+          // Always write 404.html at root
+          const htmlDest404 = join(outDir, '404.html')
+          await fs.mkdir(dirname(htmlDest404), { recursive: true })
+          await fs.copyFile(htmlSrc, htmlDest404)
+
+          // When trailingSlash, also write 404/index.html
+          if (subFolders) {
+            const htmlDest404Index = join(outDir, '404', 'index.html')
+            await fs.mkdir(dirname(htmlDest404Index), { recursive: true })
+            await fs.copyFile(htmlSrc, htmlDest404Index)
+          }
+          return
+        }
+        // Skip 500.html in static export
+        if (unnormalizedRoute === '/_global-error') {
+          return
+        }
         const { srcRoute } = prerenderManifest!.routes[unnormalizedRoute]
         const appPageName = mapAppRouteToPage.get(srcRoute || '')
         const pageName = appPageName || srcRoute || unnormalizedRoute
@@ -805,6 +854,7 @@ async function exportAppImpl(
         if (isAppRouteHandler && existsSync(handlerSrc)) {
           await fs.mkdir(dirname(handlerDest), { recursive: true })
           await fs.copyFile(handlerSrc, handlerDest)
+          console.log('copied handler', handlerSrc, handlerDest)
           return
         }
 
@@ -842,6 +892,7 @@ async function exportAppImpl(
         }
 
         const segmentsDir = `${orig}${RSC_SEGMENTS_DIR_SUFFIX}`
+
         if (isAppPath && existsSync(segmentsDir)) {
           // Output a data file for each of this page's segments
           //
@@ -871,6 +922,7 @@ async function exportAppImpl(
         }
       })
     )
+  } else {
   }
 
   if (Object.keys(ampValidations).length) {
@@ -905,7 +957,9 @@ async function exportAppImpl(
     await telemetry.flush()
   }
 
-  await worker.end()
+  if (worker) {
+    await worker.end()
+  }
 
   return collector
 }

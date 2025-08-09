@@ -2713,7 +2713,7 @@ export default async function build(
         }
       })
 
-      const hasPages500 = usedStaticStatusPages.includes('/500')
+      const hasPages500 = !appDirOnly && usedStaticStatusPages.includes('/500')
       const useDefaultStatic500 =
         !hasPages500 && !hasNonStaticErrorPage && !customAppGetInitialProps
 
@@ -2812,13 +2812,13 @@ export default async function build(
                 })
               })
 
-              if (useStaticPages404 && !!pagesDir) {
+              if (useStaticPages404 && !!pagesDir && !appDirOnly) {
                 defaultMap['/404'] = {
                   page: hasPages404 ? '/404' : '/_error',
                 }
               }
 
-              if (useDefaultStatic500 && !!pagesDir) {
+              if (useDefaultStatic500 && !!pagesDir && !appDirOnly) {
                 defaultMap['/500'] = {
                   page: '/_error',
                 }
@@ -3601,7 +3601,13 @@ export default async function build(
             await moveExportedAppNotFoundTo404()
           } else {
             // Only move /404 to /404 when there is no custom 404 as in that case we don't know about the 404 page
-            if (!hasPages404 && !hasApp404 && useStaticPages404 && pagesDir) {
+            if (
+              !hasPages404 &&
+              !hasApp404 &&
+              useStaticPages404 &&
+              pagesDir &&
+              !appDirOnly
+            ) {
               await moveExportedPage('/_error', '/404', '/404', false, 'html')
             }
           }
@@ -3649,6 +3655,7 @@ export default async function build(
             // fallback is enabled. Below, we handle the specific prerenders
             // of these.
             const hasHtmlOutput = !(isSsg && isDynamic && !isStaticSsgFallback)
+
             if (hasHtmlOutput) {
               await moveExportedPage(page, page, file, isSsg, 'html')
             }
