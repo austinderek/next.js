@@ -473,6 +473,7 @@ describe('use-cache', () => {
 
       expect(prerenderedRouteKeys).toEqual(
         [
+          '/_global-error',
           '/_not-found',
           // [id] route, first entry in generateStaticParams
           expect.stringMatching(/\/a\d/),
