@@ -226,8 +226,9 @@ export function extractSlotsFromAppRoutes(mappedAppPages: {
     if (
       page === UNDERSCORE_NOT_FOUND_ROUTE_ENTRY ||
       page === UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY
-    )
+    ) {
       continue
+    }
 
     const segments = page.split('/')
     for (let i = segments.length - 1; i >= 0; i--) {
@@ -268,8 +269,9 @@ export function processAppRoutes(
     if (
       page === UNDERSCORE_NOT_FOUND_ROUTE_ENTRY ||
       page === UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY
-    )
+    ) {
       continue
+    }
 
     const relativeFilePath = createRelativeFilePath(baseDir, filePath, 'app')
 
@@ -362,10 +364,7 @@ export async function getStaticInfoIncludingLayouts({
   }
 
   // Skip inheritance for global-error pages - always use default config
-  if (
-    page === UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY ||
-    page?.endsWith('/global-error/page')
-  ) {
+  if (page === UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY) {
     return pageStaticInfo
   }
 

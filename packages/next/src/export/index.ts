@@ -460,6 +460,12 @@ async function exportAppImpl(
       exportPathMap['/404.html'] = exportPathMap['/404']
     }
   }
+  // Do not export pages router 404/500 when only app directory is enabled
+  if (options.enabledDirectories.app && !options.enabledDirectories.pages) {
+    delete exportPathMap['/404']
+    delete exportPathMap['/404.html']
+    delete exportPathMap['/500']
+  }
 
   const allExportPaths: ExportPathEntry[] = []
   const seenExportPaths = new Set<string>()
@@ -760,13 +766,9 @@ async function exportAppImpl(
   }
 
   // copy prerendered routes to outDir
-  if (prerenderManifest) {
+  if (!options.buildExport && prerenderManifest) {
     await Promise.all(
       Object.keys(prerenderManifest.routes).map(async (unnormalizedRoute) => {
-        // Skip handling /_not-found route, it will copy the 404.html file later
-        if (unnormalizedRoute === '/_not-found') {
-          return
-        }
         const { srcRoute } = prerenderManifest!.routes[unnormalizedRoute]
         const appPageName = mapAppRouteToPage.get(srcRoute || '')
         const pageName = appPageName || srcRoute || unnormalizedRoute

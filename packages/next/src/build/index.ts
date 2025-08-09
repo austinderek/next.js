@@ -2871,8 +2871,6 @@ export default async function build(
                   for (const locale of i18n.locales) {
                     // skip fallback generation for SSG pages without fallback mode
                     if (isSsg && isDynamic && !isFallback) continue
-                    // skip generating localized versions of error pages like /500
-                    // if (page === '/500') continue
                     const outputPath = `/${locale}${page === '/' ? '' : page}`
 
                     defaultMap[outputPath] = {
@@ -3651,7 +3649,6 @@ export default async function build(
             // fallback is enabled. Below, we handle the specific prerenders
             // of these.
             const hasHtmlOutput = !(isSsg && isDynamic && !isStaticSsgFallback)
-
             if (hasHtmlOutput) {
               await moveExportedPage(page, page, file, isSsg, 'html')
             }
