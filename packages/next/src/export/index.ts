@@ -921,7 +921,6 @@ async function exportAppImpl(
         }
       })
     )
-  } else {
   }
 
   if (Object.keys(ampValidations).length) {

@@ -49,6 +49,7 @@ import {
 } from '../lib/constants'
 import {
   MODERN_BROWSERSLIST_TARGET,
+  UNDERSCORE_GLOBAL_ERROR_ROUTE,
   UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY,
   UNDERSCORE_NOT_FOUND_ROUTE,
 } from '../shared/lib/constants'
@@ -1073,9 +1074,8 @@ export async function isPageStatic({
   buildId: string
   sriEnabled: boolean
 }): Promise<PageIsStaticResult> {
-  // For Turbopack, skip page data collection for synthetic _global-error routes
-  // as they point to built-in components that aren't resolvable during static generation
-  if (process.env.TURBOPACK && page === '/_global-error') {
+  // Skip page data collection for synthetic _global-error routes
+  if (page === UNDERSCORE_GLOBAL_ERROR_ROUTE) {
     return {
       isStatic: true,
       isRoutePPREnabled: false,
