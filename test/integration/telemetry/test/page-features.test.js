@@ -176,7 +176,7 @@ describe('page features telemetry', () => {
             expect(event1).toMatch(/"ssrPageCount": 3/)
             expect(event1).toMatch(/"staticPageCount": 5/)
             expect(event1).toMatch(/"totalPageCount": 12/)
-            expect(event1).toMatch(/"totalAppPagesCount": 6/)
+            expect(event1).toMatch(/"totalAppPagesCount": 7/)
             expect(event1).toMatch(/"serverAppPagesCount": 2/)
             expect(event1).toMatch(/"edgeRuntimeAppCount": 1/)
             expect(event1).toMatch(/"edgeRuntimePagesCount": 2/)
@@ -186,7 +186,7 @@ describe('page features telemetry', () => {
               .exec(stderr)
               .pop()
 
-            expect(event2).toMatch(/"totalAppPagesCount": 6/)
+            expect(event2).toMatch(/"totalAppPagesCount": 7/)
           } catch (err) {
             require('console').error('failing stderr', stderr, err)
             throw err

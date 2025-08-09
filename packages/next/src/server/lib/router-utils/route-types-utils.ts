@@ -8,6 +8,10 @@ import { isParallelRouteSegment } from '../../../shared/lib/segment'
 import fs from 'fs'
 import { generateRouteTypesFile } from './typegen'
 import { tryToParsePath } from '../../../lib/try-to-parse-path'
+import {
+  UNDERSCORE_GLOBAL_ERROR_ROUTE,
+  UNDERSCORE_NOT_FOUND_ROUTE,
+} from '../../../shared/lib/entry-constants'
 
 interface RouteInfo {
   path: string
@@ -132,9 +136,14 @@ export async function createRouteTypesManifest({
     }
   }
 
-  // Process layout routes
+  // Process layout routes (exclude internal app error/not-found layouts)
   for (const { route, filePath } of layoutRoutes) {
     if (!isCanonicalRoute(route)) continue
+    if (
+      route === UNDERSCORE_GLOBAL_ERROR_ROUTE ||
+      route === UNDERSCORE_NOT_FOUND_ROUTE
+    )
+      continue
 
     manifest.layoutRoutes[route] = {
       path: path.relative(dir, filePath),
@@ -150,9 +159,14 @@ export async function createRouteTypesManifest({
     }
   }
 
-  // Process app routes
+  // Process app routes (exclude internal app routes)
   for (const { route, filePath } of appRoutes) {
     if (!isCanonicalRoute(route)) continue
+    if (
+      route === UNDERSCORE_GLOBAL_ERROR_ROUTE ||
+      route === UNDERSCORE_NOT_FOUND_ROUTE
+    )
+      continue
 
     manifest.appRoutes[route] = {
       path: path.relative(dir, filePath),
