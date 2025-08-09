@@ -5,6 +5,7 @@ describe('next/font/local loader', () => {
     test('Default CSS', async () => {
       const { css } = await nextFontLocalFontLoader({
         functionName: '',
+        deploymentId: undefined,
         data: [{ src: './my-font.woff2' }],
         emitFontFile: () => '/_next/static/media/my-font.woff2',
         resolve: jest.fn(),
@@ -31,6 +32,7 @@ describe('next/font/local loader', () => {
     test('Weight and style', async () => {
       const { css } = await nextFontLocalFontLoader({
         functionName: '',
+        deploymentId: undefined,
         data: [{ src: './my-font.woff2', weight: '100 900', style: 'italic' }],
         emitFontFile: () => '/_next/static/media/my-font.woff2',
         resolve: jest.fn(),
@@ -59,6 +61,7 @@ describe('next/font/local loader', () => {
     test('Other properties', async () => {
       const { css } = await nextFontLocalFontLoader({
         functionName: '',
+        deploymentId: undefined,
         data: [
           {
             src: './my-font.woff2',
@@ -95,6 +98,7 @@ describe('next/font/local loader', () => {
     test('Multiple weights default style', async () => {
       const { css } = await nextFontLocalFontLoader({
         functionName: '',
+        deploymentId: undefined,
         data: [
           {
             style: 'italic',
@@ -171,6 +175,7 @@ describe('next/font/local loader', () => {
     test('Multiple styles default weight', async () => {
       const { css } = await nextFontLocalFontLoader({
         functionName: '',
+        deploymentId: undefined,
         data: [
           {
             weight: '400',
@@ -233,6 +238,7 @@ describe('next/font/local loader', () => {
     test('Custom font-family in declarations', async () => {
       const { css } = await nextFontLocalFontLoader({
         functionName: '',
+        deploymentId: undefined,
         data: [
           {
             src: './my-font.woff2',
