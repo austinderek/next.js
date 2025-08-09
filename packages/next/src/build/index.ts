@@ -1357,7 +1357,6 @@ export default async function build(
       const hasCustomErrorPage =
         mappedPages['/_error']?.startsWith(PAGES_DIR_ALIAS)
 
-      const hasAppDir = !!appDir
       // Check if there are any user pages (non-reserved pages) in the pages router
       const hasUserPagesRoutes = Object.keys(mappedPages).some(
         (route) => !isReservedPage(route)
@@ -2813,13 +2812,13 @@ export default async function build(
                 })
               })
 
-              if (useStaticPages404 && !hasAppDir) {
+              if (useStaticPages404 && !!pagesDir) {
                 defaultMap['/404'] = {
                   page: hasPages404 ? '/404' : '/_error',
                 }
               }
 
-              if (useDefaultStatic500 && !hasAppDir) {
+              if (useDefaultStatic500 && !!pagesDir) {
                 defaultMap['/500'] = {
                   page: '/_error',
                 }

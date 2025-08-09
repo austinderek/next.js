@@ -223,7 +223,11 @@ export function extractSlotsFromAppRoutes(mappedAppPages: {
   const slots: SlotInfo[] = []
 
   for (const [page] of Object.entries(mappedAppPages)) {
-    if (page === UNDERSCORE_NOT_FOUND_ROUTE_ENTRY) continue
+    if (
+      page === UNDERSCORE_NOT_FOUND_ROUTE_ENTRY ||
+      page === UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY
+    )
+      continue
 
     const segments = page.split('/')
     for (let i = segments.length - 1; i >= 0; i--) {
@@ -261,7 +265,11 @@ export function processAppRoutes(
   const appRoutes: RouteInfo[] = []
 
   for (const [page, filePath] of Object.entries(mappedAppPages)) {
-    if (page === UNDERSCORE_NOT_FOUND_ROUTE_ENTRY) continue
+    if (
+      page === UNDERSCORE_NOT_FOUND_ROUTE_ENTRY ||
+      page === UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY
+    )
+      continue
 
     const relativeFilePath = createRelativeFilePath(baseDir, filePath, 'app')
 

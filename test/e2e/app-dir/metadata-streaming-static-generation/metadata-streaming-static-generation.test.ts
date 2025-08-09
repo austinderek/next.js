@@ -23,6 +23,7 @@ const isPPREnabled = process.env.__NEXT_EXPERIMENTAL_PPR === 'true'
         expect(Object.keys(staticRoutes).sort()).toEqual([
           '/',
           '/_not-found',
+          '/_global-error',
           '/slow/static',
           '/suspenseful/static',
         ])
