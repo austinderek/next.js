@@ -854,7 +854,6 @@ async function exportAppImpl(
         if (isAppRouteHandler && existsSync(handlerSrc)) {
           await fs.mkdir(dirname(handlerDest), { recursive: true })
           await fs.copyFile(handlerSrc, handlerDest)
-          console.log('copied handler', handlerSrc, handlerDest)
           return
         }
 

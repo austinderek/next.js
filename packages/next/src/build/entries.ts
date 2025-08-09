@@ -573,7 +573,7 @@ export async function createPagesMapping({
 
       return {
         // Don't add default pages entries if this is an app-router-only build
-        ...((isDev || ((hasPagesRoutes || !appDir) && !appDirOnly)) && {
+        ...((isDev || hasPagesRoutes || !appDirOnly) && {
           '/_app': `${root}/_app`,
           '/_error': `${root}/_error`,
           '/_document': `${root}/_document`,

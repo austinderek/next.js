@@ -987,30 +987,6 @@ describe('app-dir static/dynamic handling', () => {
            "initialRevalidateSeconds": false,
            "srcRoute": "/",
          },
-         "/_global-error": {
-           "allowHeader": [
-             "host",
-             "x-matched-path",
-             "x-prerender-revalidate",
-             "x-prerender-revalidate-if-generated",
-             "x-next-revalidated-tags",
-             "x-next-revalidate-tag-token",
-           ],
-           "dataRoute": "/_global-error.rsc",
-           "experimentalBypassFor": [
-             {
-               "key": "next-action",
-               "type": "header",
-             },
-             {
-               "key": "content-type",
-               "type": "header",
-               "value": "multipart/form-data;.*",
-             },
-           ],
-           "initialRevalidateSeconds": false,
-           "srcRoute": "/_global-error",
-         },
          "/_not-found": {
            "allowHeader": [
              "host",

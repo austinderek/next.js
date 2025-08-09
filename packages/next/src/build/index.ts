@@ -3606,7 +3606,7 @@ export default async function build(
             }
           }
 
-          if (useDefaultStatic500 && pagesDir) {
+          if (useDefaultStatic500 && pagesDir && !appDirOnly) {
             await moveExportedPage('/_error', '/500', '/500', false, 'html')
           }
 
