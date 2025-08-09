@@ -549,11 +549,12 @@ export async function createPagesMapping({
           ),
         }),
         // App router default 500.html entry
-        ...(!isDev && {
-          [UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY]: require.resolve(
-            'next/dist/client/components/builtin/app-error'
-          ),
-        }),
+        ...(!isDev &&
+          !appDirOnly && {
+            [UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY]: require.resolve(
+              'next/dist/client/components/builtin/app-error'
+            ),
+          }),
         ...pages,
       }
     }

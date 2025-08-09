@@ -1222,7 +1222,7 @@ export default async function build(
               pageExtensions: config.pageExtensions,
               pagesDir,
               appDir,
-              appDirOnly,
+              appDirOnly: Boolean(appDirOnly || pagesDir),
             })
           )
 

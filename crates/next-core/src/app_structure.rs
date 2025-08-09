@@ -1531,17 +1531,31 @@ async fn directory_tree_to_entrypoints_internal_untraced(
         // This aligns with webpack: default Pages entries (including /_error) are only added when
         // the build isn't app-only. If the build is app-only (no user pages/api), we should still
         // expose the app global error so runtime errors render, but we shouldn't emit it otherwise.
-        if matches!(*next_mode.await?, NextMode::Build)
-            && !crate::pages_structure::find_pages_structure(
-                app_dir.parent(),
-                app_dir.clone(),
-                // Use the default page extensions from config defaults
-                Vc::cell(crate::next_config::NextConfig::default().page_extensions),
-                next_mode,
-            )
-            .await?
-            .has_user_pages
-        {
+
+        // Determine project root: if app_dir is [project]/src/app, use [project]; if [project]/app,
+        // use [project]
+        let project_root = if app_dir.file_name() == "app" {
+            let parent = app_dir.parent();
+            if parent.file_name() == "src" {
+                parent.parent()
+            } else {
+                parent
+            }
+        } else {
+            app_dir.parent()
+        };
+
+        let has_user_pages = crate::pages_structure::find_pages_structure(
+            project_root,
+            app_dir.clone(),
+            // Use the default page extensions from config defaults
+            Vc::cell(crate::next_config::NextConfig::default().page_extensions),
+            next_mode,
+        )
+        .await?
+        .has_user_pages;
+
+        if matches!(*next_mode.await?, NextMode::Build) && !has_user_pages {
             // Use built-in global-error.js to create a `_global-error/page` route.
             let global_error_tree = AppPageLoaderTree {
                 page: app_page.clone(),
@@ -1565,18 +1579,16 @@ async fn directory_tree_to_entrypoints_internal_untraced(
             }
             .resolved_cell();
 
-            {
-                let app_global_error_page = app_page
-                    .clone_push_str("_global-error")?
-                    .complete(PageType::Page)?;
-                add_app_page(
-                    app_dir.clone(),
-                    &mut result,
-                    app_global_error_page,
-                    global_error_tree,
-                    root_params,
-                );
-            }
+            let app_global_error_page = app_page
+                .clone_push_str("_global-error")?
+                .complete(PageType::Page)?;
+            add_app_page(
+                app_dir.clone(),
+                &mut result,
+                app_global_error_page,
+                global_error_tree,
+                root_params,
+            );
         }
     }
 
