@@ -532,9 +532,7 @@ export async function createPagesMapping({
       return pages
     }
     case PAGE_TYPES.APP: {
-      const hasAppPages = Object.keys(pages).some((page) =>
-        page.endsWith('/page')
-      )
+      const hasAppPages = Object.keys(pages).length > 0
       return {
         // If there's any app pages existed, add a default /_not-found route as 404.
         // If there's any custom /_not-found page, it will override the default one.
@@ -544,12 +542,11 @@ export async function createPagesMapping({
           ),
         }),
         // App router default 500.html entry
-        ...(appDirOnly &&
-          !isDev && {
-            [UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY]: require.resolve(
-              'next/dist/client/components/builtin/app-error'
-            ),
-          }),
+        ...(!isDev && {
+          [UNDERSCORE_GLOBAL_ERROR_ROUTE_ENTRY]: require.resolve(
+            'next/dist/client/components/builtin/app-error'
+          ),
+        }),
         ...pages,
       }
     }

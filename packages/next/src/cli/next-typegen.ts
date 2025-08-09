@@ -83,7 +83,7 @@ const nextTypegen = async (
       pageExtensions: nextConfig.pageExtensions,
       pagesDir,
       appDir,
-      appDirOnly: !pagesDir,
+      appDirOnly: !!appDir && !pagesDir,
     })
 
   // Build pages routes

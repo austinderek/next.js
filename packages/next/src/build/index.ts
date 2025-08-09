@@ -1007,7 +1007,7 @@ export default async function build(
       }
 
       // If no pages directory exists, this is an app-router-only build
-      if (!enabledDirectories.pages) {
+      if (!enabledDirectories.pages && enabledDirectories.app) {
         appDirOnly = true
         NextBuildContext.appDirOnly = appDirOnly
       }
@@ -3411,9 +3411,6 @@ export default async function build(
               .traceAsyncFn(async () => {
                 file = `${file}.${ext}`
                 const orig = path.join(outdir, file)
-                if (!existsSync(orig)) {
-                  return
-                }
                 const pagePath = getPagePath(
                   originPage,
                   distDir,
@@ -3461,6 +3458,9 @@ export default async function build(
                 // for SSG files with i18n the non-prerendered variants are
                 // output with the locale prefixed so don't attempt moving
                 // without the prefix
+                if (!existsSync(orig)) {
+                  return
+                }
                 if ((!i18n || additionalSsgFile) && !isNotFound) {
                   await fs.mkdir(path.dirname(dest), { recursive: true })
                   await fs.rename(orig, dest)
@@ -3566,6 +3566,13 @@ export default async function build(
             return staticGenerationSpan
               .traceChild('move-exported-app-global-error-')
               .traceAsyncFn(async () => {
+                // If static 500.html exists in pages router, don't move it
+                if (
+                  existsSync(path.join(distDir, 'server', 'pages', '500.html'))
+                ) {
+                  return
+                }
+
                 // Only handle 500.html generation for static export
                 const orig = path.join(
                   distDir,
@@ -3597,20 +3604,18 @@ export default async function build(
             await moveExportedAppNotFoundTo404()
           } else {
             // Only move /404 to /404 when there is no custom 404 as in that case we don't know about the 404 page
-            if (!hasPages404 && !hasApp404 && useStaticPages404 && hasAppDir) {
+            if (!hasPages404 && !hasApp404 && useStaticPages404 && pagesDir) {
               await moveExportedPage('/_error', '/404', '/404', false, 'html')
             }
           }
 
-          if (useDefaultStatic500 && hasAppDir) {
+          if (useDefaultStatic500 && pagesDir) {
             await moveExportedPage('/_error', '/500', '/500', false, 'html')
           }
 
           // If there's app router and no pages router, use app router built-in 500.html
           if (
             hasStaticAppGlobalError &&
-            hasAppDir &&
-            !pagesDir &&
             mappedAppPages &&
             Object.keys(mappedAppPages).length > 0
           ) {
