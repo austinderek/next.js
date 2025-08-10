@@ -428,7 +428,7 @@ async function startWatcher(
         })
 
         if (isMiddlewareFile(rootFile)) {
-          validateMiddlewareInSrcDir(rootFile, isSrcDir)
+          validateMiddlewareInSrcDir(rootFile, opts.isSrcDir)
           
           const staticInfo = await getStaticInfoIncludingLayouts({
             pageFilePath: fileName,
@@ -457,7 +457,7 @@ async function startWatcher(
           continue
         }
         if (isInstrumentationHookFile(rootFile)) {
-          validateInstrumentationInSrcDir(rootFile, isSrcDir)
+          validateInstrumentationInSrcDir(rootFile, opts.isSrcDir)
           
           serverFields.actualInstrumentationHookFile = rootFile
           await propagateServerField(
