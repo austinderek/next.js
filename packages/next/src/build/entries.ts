@@ -559,7 +559,6 @@ export async function createPagesMapping({
       }
     }
     case PAGE_TYPES.PAGES: {
-      const hasPagesRoutes = Object.keys(pages).length > 0
       if (isDev) {
         delete pages['/_app']
         delete pages['/_error']
@@ -573,7 +572,7 @@ export async function createPagesMapping({
 
       return {
         // Don't add default pages entries if this is an app-router-only build
-        ...((isDev || hasPagesRoutes || !appDirOnly) && {
+        ...((isDev || !appDirOnly) && {
           '/_app': `${root}/_app`,
           '/_error': `${root}/_error`,
           '/_document': `${root}/_document`,

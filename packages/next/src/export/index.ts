@@ -215,6 +215,13 @@ async function exportAppImpl(
     }
   }
 
+  // During static export, remove export 404/500 of pages router
+  // when only app router presents
+  if (!options.buildExport && options.appDirOnly) {
+    delete defaultPathMap['/404']
+    delete defaultPathMap['/500']
+  }
+
   // Initialize the output directory
   const outDir = options.outdir
 

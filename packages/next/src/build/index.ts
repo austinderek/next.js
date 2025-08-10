@@ -2813,13 +2813,13 @@ export default async function build(
                 })
               })
 
-              if (useStaticPages404 && Boolean(!appDirOnly)) {
+              if (useStaticPages404 && !appDirOnly) {
                 defaultMap['/404'] = {
                   page: hasPages404 ? '/404' : '/_error',
                 }
               }
 
-              if (useDefaultStatic500 && Boolean(!appDirOnly)) {
+              if (useDefaultStatic500 && !appDirOnly) {
                 defaultMap['/500'] = {
                   page: '/_error',
                 }
