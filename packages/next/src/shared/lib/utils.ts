@@ -428,6 +428,7 @@ export class PageNotFoundError extends Error {
     this.code = 'ENOENT'
     this.name = 'PageNotFoundError'
     this.message = `Cannot find module for page: ${page}`
+    console.trace('PageNotFoundError', page)
   }
 }
 
