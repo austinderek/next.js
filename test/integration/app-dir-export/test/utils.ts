@@ -74,6 +74,8 @@ const expectedWhenTrailingSlashFalse = [
     ? ['_next/static/test-build-id/_clientMiddlewareManifest.json']
     : []),
   '_next/static/test-build-id/_ssgManifest.js',
+  '_not-found.html',
+  '_not-found.txt',
   'another.html',
   'another.txt',
   'another/first.html',
