@@ -813,9 +813,6 @@ async function exportAppImpl(
             await fs.mkdir(dirname(htmlDest404Index), { recursive: true })
             await fs.copyFile(htmlSrc, htmlDest404Index)
           }
-          if (!options.buildExport) {
-            await fs.rm(htmlSrc)
-          }
         }
         // Skip 500.html in static export
         if (unnormalizedRoute === '/_global-error') {
