@@ -783,7 +783,39 @@ async function exportAppImpl(
       Object.keys(prerenderManifest.routes).map(async (unnormalizedRoute) => {
         // Special handling: map app /_not-found to 404.html (and 404/index.html when trailingSlash)
         if (unnormalizedRoute === '/_not-found') {
-          return
+          const { srcRoute } = prerenderManifest!.routes[unnormalizedRoute]
+          const appPageName = mapAppRouteToPage.get(srcRoute || '')
+          const pageName = appPageName || srcRoute || unnormalizedRoute
+          const isAppPath = Boolean(appPageName)
+          const route = normalizePagePath(unnormalizedRoute)
+
+          const pagePath = getPagePath(pageName, distDir, undefined, isAppPath)
+          const distPagesDir = join(
+            pagePath,
+            pageName
+              .slice(1)
+              .split('/')
+              .map(() => '..')
+              .join('/')
+          )
+
+          const orig = join(distPagesDir, route)
+          const htmlSrc = `${orig}.html`
+
+          // write 404.html at root
+          const htmlDest404 = join(outDir, '404.html')
+          await fs.mkdir(dirname(htmlDest404), { recursive: true })
+          await fs.copyFile(htmlSrc, htmlDest404)
+
+          // When trailingSlash, also write 404/index.html
+          if (subFolders) {
+            const htmlDest404Index = join(outDir, '404', 'index.html')
+            await fs.mkdir(dirname(htmlDest404Index), { recursive: true })
+            await fs.copyFile(htmlSrc, htmlDest404Index)
+          }
+          if (!options.buildExport) {
+            await fs.rm(htmlSrc)
+          }
         }
         // Skip 500.html in static export
         if (unnormalizedRoute === '/_global-error') {
