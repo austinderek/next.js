@@ -1230,7 +1230,7 @@ export default async function build(
               pageExtensions: config.pageExtensions,
               pagesDir,
               appDir,
-              appDirOnly,
+              appDirOnly: Boolean(appDirOnly || !pagesDir),
             })
           )
 
@@ -1244,7 +1244,7 @@ export default async function build(
         pagesType: PAGE_TYPES.ROOT,
         pagesDir: pagesDir,
         appDir,
-        appDirOnly,
+        appDirOnly: Boolean(appDirOnly || !pagesDir),
       })
       NextBuildContext.mappedRootPaths = mappedRootPaths
 
@@ -2707,7 +2707,8 @@ export default async function build(
         }
       })
 
-      const hasPages500 = !appDirOnly && usedStaticStatusPages.includes('/500')
+      const hasPages500 =
+        (!appDirOnly || pagesDir) && usedStaticStatusPages.includes('/500')
       const useDefaultStatic500 =
         !hasPages500 && !hasNonStaticErrorPage && !customAppGetInitialProps
 
@@ -2806,13 +2807,13 @@ export default async function build(
                 })
               })
 
-              if (useStaticPages404 && !!pagesDir && !appDirOnly) {
+              if (useStaticPages404 && Boolean(!appDirOnly || pagesDir)) {
                 defaultMap['/404'] = {
                   page: hasPages404 ? '/404' : '/_error',
                 }
               }
 
-              if (useDefaultStatic500 && !!pagesDir && !appDirOnly) {
+              if (useDefaultStatic500 && Boolean(!appDirOnly || pagesDir)) {
                 defaultMap['/500'] = {
                   page: '/_error',
                 }
@@ -3590,6 +3591,7 @@ export default async function build(
               })
           }
 
+          const isAppDirOnly = Boolean(appDirOnly || !pagesDir)
           // If there's /not-found inside app, we prefer it over the pages 404
           if (hasStaticApp404) {
             await moveExportedAppNotFoundTo404()
@@ -3599,14 +3601,13 @@ export default async function build(
               !hasPages404 &&
               !hasApp404 &&
               useStaticPages404 &&
-              pagesDir &&
-              !appDirOnly
+              !isAppDirOnly
             ) {
               await moveExportedPage('/_error', '/404', '/404', false, 'html')
             }
           }
 
-          if (useDefaultStatic500 && pagesDir && !appDirOnly) {
+          if (useDefaultStatic500 && !isAppDirOnly) {
             await moveExportedPage('/_error', '/500', '/500', false, 'html')
           }
 

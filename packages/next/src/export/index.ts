@@ -460,10 +460,8 @@ async function exportAppImpl(
       exportPathMap['/404.html'] = exportPathMap['/404']
     }
   }
-  // Do not export pages router 404/500 when only app directory is enabled
+  // Do not export pages router 500 when only app directory is enabled
   if (options.enabledDirectories.app && !options.enabledDirectories.pages) {
-    delete exportPathMap['/404']
-    delete exportPathMap['/404.html']
     delete exportPathMap['/500']
   }
 
@@ -777,41 +775,11 @@ async function exportAppImpl(
   }
 
   // copy prerendered routes to outDir
-  if (prerenderManifest) {
+  if (!options.buildExport && prerenderManifest) {
     await Promise.all(
       Object.keys(prerenderManifest.routes).map(async (unnormalizedRoute) => {
         // Special handling: map app /_not-found to 404.html (and 404/index.html when trailingSlash)
         if (unnormalizedRoute === '/_not-found') {
-          const { srcRoute } = prerenderManifest!.routes[unnormalizedRoute]
-          const appPageName = mapAppRouteToPage.get(srcRoute || '')
-          const pageName = appPageName || srcRoute || unnormalizedRoute
-          const isAppPath = Boolean(appPageName)
-          const route = normalizePagePath(unnormalizedRoute)
-
-          const pagePath = getPagePath(pageName, distDir, undefined, isAppPath)
-          const distPagesDir = join(
-            pagePath,
-            pageName
-              .slice(1)
-              .split('/')
-              .map(() => '..')
-              .join('/')
-          )
-
-          const orig = join(distPagesDir, route)
-          const htmlSrc = `${orig}.html`
-
-          // Always write 404.html at root
-          const htmlDest404 = join(outDir, '404.html')
-          await fs.mkdir(dirname(htmlDest404), { recursive: true })
-          await fs.copyFile(htmlSrc, htmlDest404)
-
-          // When trailingSlash, also write 404/index.html
-          if (subFolders) {
-            const htmlDest404Index = join(outDir, '404', 'index.html')
-            await fs.mkdir(dirname(htmlDest404Index), { recursive: true })
-            await fs.copyFile(htmlSrc, htmlDest404Index)
-          }
           return
         }
         // Skip 500.html in static export
