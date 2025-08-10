@@ -1783,11 +1783,22 @@ export function getPossibleInstrumentationHookFilenames(
   extensions: string[]
 ) {
   const files = []
+  const srcDir = path.join(folder, 'src')
+  
+  // Check if src directory exists
+  const fs = require('fs')
+  const hasSrcDir = fs.existsSync(srcDir)
+  
   for (const extension of extensions) {
-    files.push(
-      path.join(folder, `${INSTRUMENTATION_HOOK_FILENAME}.${extension}`),
-      path.join(folder, `src`, `${INSTRUMENTATION_HOOK_FILENAME}.${extension}`)
-    )
+    if (hasSrcDir) {
+      files.push(
+        path.join(folder, `src`, `${INSTRUMENTATION_HOOK_FILENAME}.${extension}`)
+      )
+    } else {
+      files.push(
+        path.join(folder, `${INSTRUMENTATION_HOOK_FILENAME}.${extension}`)
+      )
+    }
   }
 
   return files
