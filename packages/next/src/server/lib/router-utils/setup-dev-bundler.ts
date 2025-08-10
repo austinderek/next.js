@@ -64,6 +64,8 @@ import {
   isInstrumentationHookFile,
   getPossibleMiddlewareFilenames,
   getPossibleInstrumentationHookFilenames,
+  validateMiddlewareInSrcDir,
+  validateInstrumentationInSrcDir,
 } from '../../../build/utils'
 import { devPageFiles } from '../../../build/webpack/plugins/next-types-plugin/shared'
 import type { LazyRenderServerInstance } from '../router-server'
@@ -426,6 +428,8 @@ async function startWatcher(
         })
 
         if (isMiddlewareFile(rootFile)) {
+          validateMiddlewareInSrcDir(rootFile, isSrcDir)
+          
           const staticInfo = await getStaticInfoIncludingLayouts({
             pageFilePath: fileName,
             config: nextConfig,
@@ -453,6 +457,8 @@ async function startWatcher(
           continue
         }
         if (isInstrumentationHookFile(rootFile)) {
+          validateInstrumentationInSrcDir(rootFile, isSrcDir)
+          
           serverFields.actualInstrumentationHookFile = rootFile
           await propagateServerField(
             opts,

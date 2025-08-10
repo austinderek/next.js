@@ -1821,6 +1821,33 @@ export class NestedMiddlewareError extends Error {
   }
 }
 
+export class SrcDirectoryError extends Error {
+  constructor(
+    fileName: string,
+    fileType: 'middleware' | 'instrumentation'
+  ) {
+    super(
+      `${fileType === 'middleware' ? 'Middleware' : 'Instrumentation'} file found outside src directory.\n` +
+        `Found: ${fileName}\n` +
+        `When using the src directory, ${fileType} files must be placed inside the src directory.\n` +
+        `Please move your ${fileType} file to src/${fileType}.\n` +
+        `Read More - https://nextjs.org/docs/app/api-reference/file-conventions/src-folder`
+    )
+  }
+}
+
+export function validateMiddlewareInSrcDir(fileName: string, isSrcDir: boolean) {
+  if (isSrcDir && isMiddlewareFile(fileName) && !fileName.startsWith('/src/')) {
+    throw new SrcDirectoryError(fileName, 'middleware')
+  }
+}
+
+export function validateInstrumentationInSrcDir(fileName: string, isSrcDir: boolean) {
+  if (isSrcDir && isInstrumentationHookFile(fileName) && !fileName.startsWith('/src/')) {
+    throw new SrcDirectoryError(fileName, 'instrumentation')
+  }
+}
+
 export function getSupportedBrowsers(
   dir: string,
   isDevelopment: boolean

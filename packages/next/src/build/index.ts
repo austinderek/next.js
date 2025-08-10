@@ -93,6 +93,11 @@ import {
   TurborepoAccessTraceResult,
   writeTurborepoAccessTraceResult,
 } from './turborepo-access-trace'
+import {
+  validateMiddlewareInSrcDir,
+  validateInstrumentationInSrcDir,
+} from './utils'
+
 
 import {
   eventBuildOptimize,
@@ -1156,6 +1161,17 @@ export default async function build(
       )
 
       NextBuildContext.hasInstrumentationHook = hasInstrumentationHook
+
+      if (isSrcDir) {
+        for (const rootPath of rootPaths) {
+          if (rootPath.includes(MIDDLEWARE_FILENAME)) {
+            validateMiddlewareInSrcDir(rootPath, isSrcDir)
+          }
+          if (rootPath.includes(INSTRUMENTATION_HOOK_FILENAME)) {
+            validateInstrumentationInSrcDir(rootPath, isSrcDir)
+          }
+        }
+      }
 
       const previewProps: __ApiPreviewProps = await generatePreviewKeys({
         isBuild: true,
