@@ -81,6 +81,8 @@ import { buildAppStaticPaths } from './static-paths/app'
 import { buildPagesStaticPaths } from './static-paths/pages'
 import type { PrerenderedRoute } from './static-paths/types'
 import type { CacheControl } from '../server/lib/cache-control'
+import { normalizePathSep } from '../shared/lib/page-path/normalize-path-sep'
+
 import { formatExpire, formatRevalidate } from './output/format'
 
 export type ROUTER_TYPE = 'pages' | 'app'
@@ -1822,10 +1824,7 @@ export class NestedMiddlewareError extends Error {
 }
 
 export class SrcDirectoryError extends Error {
-  constructor(
-    fileName: string,
-    fileType: 'middleware' | 'instrumentation'
-  ) {
+  constructor(fileName: string, fileType: 'middleware' | 'instrumentation') {
     super(
       `${fileType === 'middleware' ? 'Middleware' : 'Instrumentation'} file found outside src directory.\n` +
         `Found: ${fileName}\n` +
@@ -1836,14 +1835,30 @@ export class SrcDirectoryError extends Error {
   }
 }
 
-export function validateMiddlewareInSrcDir(fileName: string, isSrcDir: boolean) {
-  if (isSrcDir && isMiddlewareFile(fileName) && !fileName.startsWith('/src/')) {
+export function validateMiddlewareInSrcDir(
+  fileName: string,
+  isSrcDir: boolean
+) {
+  const normalizedPath = normalizePathSep(fileName)
+  if (
+    isSrcDir &&
+    isMiddlewareFile(fileName) &&
+    !normalizedPath.startsWith('/src/')
+  ) {
     throw new SrcDirectoryError(fileName, 'middleware')
   }
 }
 
-export function validateInstrumentationInSrcDir(fileName: string, isSrcDir: boolean) {
-  if (isSrcDir && isInstrumentationHookFile(fileName) && !fileName.startsWith('/src/')) {
+export function validateInstrumentationInSrcDir(
+  fileName: string,
+  isSrcDir: boolean
+) {
+  const normalizedPath = normalizePathSep(fileName)
+  if (
+    isSrcDir &&
+    isInstrumentationHookFile(fileName) &&
+    !normalizedPath.startsWith('/src/')
+  ) {
     throw new SrcDirectoryError(fileName, 'instrumentation')
   }
 }

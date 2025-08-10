@@ -98,7 +98,6 @@ import {
   validateInstrumentationInSrcDir,
 } from './utils'
 
-
 import {
   eventBuildOptimize,
   eventCliSession,
@@ -1165,10 +1164,12 @@ export default async function build(
       if (isSrcDir) {
         for (const rootPath of rootPaths) {
           if (rootPath.includes(MIDDLEWARE_FILENAME)) {
-            validateMiddlewareInSrcDir(rootPath, isSrcDir)
+            const pathWithoutExtension = rootPath.replace(/\.[^/.]+$/, '')
+            validateMiddlewareInSrcDir(pathWithoutExtension, isSrcDir)
           }
           if (rootPath.includes(INSTRUMENTATION_HOOK_FILENAME)) {
-            validateInstrumentationInSrcDir(rootPath, isSrcDir)
+            const pathWithoutExtension = rootPath.replace(/\.[^/.]+$/, '')
+            validateInstrumentationInSrcDir(pathWithoutExtension, isSrcDir)
           }
         }
       }
