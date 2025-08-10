@@ -339,7 +339,7 @@ export function abortAndThrowOnSynchronousRequestDataAccess(
 /**
  * Use this function when dynamically prerendering with dynamicIO.
  * We don't want to error, because it's better to return something
- * (and we've already aborted the render at the point where the sync dynamic error occured),
+ * (and we've already aborted the render at the point where the sync dynamic error occurred),
  * but we should log an error server-side.
  * @internal
  */

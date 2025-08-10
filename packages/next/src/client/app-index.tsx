@@ -205,7 +205,7 @@ function Root({ children }: React.PropsWithChildren<{}>) {
 }
 
 function onDefaultTransitionIndicator() {
-  // TODO: Compose default with user-configureable (e.g. nprogress)
+  // TODO: Compose default with user-configurable (e.g. nprogress)
   // TODO: Use React's default once we figure out hanging indicators: https://codesandbox.io/p/sandbox/charming-moon-hktkp6?file=%2Fsrc%2Findex.js%3A106%2C30
   return () => {}
 }

@@ -316,7 +316,7 @@ function collectSegmentDataImpl(
   return {
     name,
     paramType,
-    // This value is ommitted from the prefetch response when clientParamParsing
+    // This value is omitted from the prefetch response when clientParamParsing
     // is enabled. The flag only exists while we're testing the feature, in
     // case there's a bug and we need to revert.
     // TODO: Remove once clientParamParsing is enabled everywhere.

@@ -325,7 +325,7 @@ function createLazyPrefetchEntry({
       nextUrl,
       prefetchKind: kind,
     }).then((prefetchResponse) => {
-      // TODO: `fetchServerResponse` should be more tighly coupled to these prefetch cache operations
+      // TODO: `fetchServerResponse` should be more tightly coupled to these prefetch cache operations
       // to avoid drift between this cache key prefixing logic
       // (which is currently directly influenced by the server response)
       let newCacheKey
