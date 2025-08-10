@@ -838,7 +838,8 @@ async function writeFullyStaticExport(
   dir: string,
   enabledDirectories: NextEnabledDirectories,
   configOutDir: string,
-  nextBuildSpan: Span
+  nextBuildSpan: Span,
+  appDirOnly: boolean
 ): Promise<void> {
   const exportApp = (require('../export') as typeof import('../export'))
     .default as typeof import('../export').default
@@ -852,6 +853,7 @@ async function writeFullyStaticExport(
       silent: true,
       outdir: path.join(dir, configOutDir),
       numWorkers: getNumberOfWorkers(config),
+      appDirOnly,
     },
     nextBuildSpan
   )
@@ -998,6 +1000,11 @@ export default async function build(
 
       const publicDir = path.join(dir, 'public')
       const { pagesDir, appDir } = findPagesDir(dir)
+
+      if (!appDirOnly && !pagesDir) {
+        appDirOnly = true
+      }
+
       NextBuildContext.pagesDir = pagesDir
       NextBuildContext.appDir = appDir
 
@@ -1216,7 +1223,7 @@ export default async function build(
               pageExtensions: config.pageExtensions,
               pagesDir,
               appDir,
-              appDirOnly: Boolean(appDirOnly || !pagesDir),
+              appDirOnly,
             })
           )
 
@@ -1230,7 +1237,7 @@ export default async function build(
               pageExtensions: config.pageExtensions,
               pagesDir,
               appDir,
-              appDirOnly: Boolean(appDirOnly || !pagesDir),
+              appDirOnly,
             })
           )
 
@@ -1244,7 +1251,7 @@ export default async function build(
         pagesType: PAGE_TYPES.ROOT,
         pagesDir: pagesDir,
         appDir,
-        appDirOnly: Boolean(appDirOnly || !pagesDir),
+        appDirOnly,
       })
       NextBuildContext.mappedRootPaths = mappedRootPaths
 
@@ -2707,8 +2714,7 @@ export default async function build(
         }
       })
 
-      const hasPages500 =
-        (!appDirOnly || pagesDir) && usedStaticStatusPages.includes('/500')
+      const hasPages500 = !appDirOnly && usedStaticStatusPages.includes('/500')
       const useDefaultStatic500 =
         !hasPages500 && !hasNonStaticErrorPage && !customAppGetInitialProps
 
@@ -2807,13 +2813,13 @@ export default async function build(
                 })
               })
 
-              if (useStaticPages404 && Boolean(!appDirOnly || pagesDir)) {
+              if (useStaticPages404 && Boolean(!appDirOnly)) {
                 defaultMap['/404'] = {
                   page: hasPages404 ? '/404' : '/_error',
                 }
               }
 
-              if (useDefaultStatic500 && Boolean(!appDirOnly || pagesDir)) {
+              if (useDefaultStatic500 && Boolean(!appDirOnly)) {
                 defaultMap['/500'] = {
                   page: '/_error',
                 }
@@ -2900,6 +2906,7 @@ export default async function build(
               outdir,
               statusMessage: 'Generating static pages',
               numWorkers: getNumberOfWorkers(exportConfig),
+              appDirOnly,
             },
             nextBuildSpan
           )
@@ -3591,7 +3598,6 @@ export default async function build(
               })
           }
 
-          const isAppDirOnly = Boolean(appDirOnly || !pagesDir)
           // If there's /not-found inside app, we prefer it over the pages 404
           if (hasStaticApp404) {
             await moveExportedAppNotFoundTo404()
@@ -3601,13 +3607,13 @@ export default async function build(
               !hasPages404 &&
               !hasApp404 &&
               useStaticPages404 &&
-              !isAppDirOnly
+              !appDirOnly
             ) {
               await moveExportedPage('/_error', '/404', '/404', false, 'html')
             }
           }
 
-          if (useDefaultStatic500 && !isAppDirOnly) {
+          if (useDefaultStatic500 && !appDirOnly) {
             await moveExportedPage('/_error', '/500', '/500', false, 'html')
           }
 
@@ -3973,7 +3979,8 @@ export default async function build(
           dir,
           enabledDirectories,
           configOutDir,
-          nextBuildSpan
+          nextBuildSpan,
+          appDirOnly
         )
       }
 

@@ -445,7 +445,7 @@ async function exportAppImpl(
     })
 
   // only add missing 404 page when `buildExport` is false
-  if (!options.buildExport) {
+  if (!options.buildExport && !options.appDirOnly) {
     // only add missing /404 if not specified in `exportPathMap`
     if (!exportPathMap['/404']) {
       exportPathMap['/404'] = { page: '/_error' }
@@ -459,10 +459,6 @@ async function exportAppImpl(
       // alias /404.html to /404 to be compatible with custom 404 / _error page
       exportPathMap['/404.html'] = exportPathMap['/404']
     }
-  }
-  // Do not export pages router 500 when only app directory is enabled
-  if (options.enabledDirectories.app && !options.enabledDirectories.pages) {
-    delete exportPathMap['/500']
   }
 
   const allExportPaths: ExportPathEntry[] = []
