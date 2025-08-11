@@ -340,9 +340,13 @@ impl ErrorKind {
 // The directory match regex is guaranteed to be valid and will match the same
 // semantics as the glob when used to check if a directory path might contain files that match
 // this glob. This means we care about matching prefixes that are bounded by `/` characters.
-pub(crate) fn parse(glob: &str) -> Result<(String, String), Error> {
-    let tokens = Parser::new(glob).parse()?;
-    Ok((tokens.to_regex(), tokens.to_directory_match_regex()))
+pub(crate) fn parse(glob: &str) -> Result<(String, String, bool), Error> {
+    let (tokens, contains_recursive_prefix) = Parser::new(glob).parse()?;
+    Ok((
+        tokens.to_regex(),
+        tokens.to_directory_match_regex(),
+        contains_recursive_prefix,
+    ))
 }
 
 struct Parser<'a> {
@@ -357,6 +361,8 @@ struct Parser<'a> {
     char_pos: usize,
     prev: Option<char>,
     cur: Option<char>,
+
+    contains_recursive_prefix: bool,
 }
 fn is_separator(c: char) -> bool {
     c == '/'
@@ -371,6 +377,7 @@ impl<'a> Parser<'a> {
             char_pos: 0,
             prev: None,
             cur: None,
+            contains_recursive_prefix: false,
         }
     }
     fn error(&self, kind: ErrorKind) -> Error {
@@ -379,7 +386,7 @@ impl<'a> Parser<'a> {
     }
 
     // Parsing consumes the parser
-    fn parse(mut self) -> Result<Tokens, Error> {
+    fn parse(mut self) -> Result<(Tokens, bool), Error> {
         while let Some(c) = self.bump() {
             match c {
                 '?' => self.push_token(Token::Any),
@@ -396,7 +403,7 @@ impl<'a> Parser<'a> {
             return Err(self.error(ErrorKind::UnclosedAlternates));
         }
         debug_assert!(self.branches.len() == 1);
-        return Ok(self.branches.pop().unwrap());
+        return Ok((self.branches.pop().unwrap(), self.contains_recursive_prefix));
     }
 
     fn push_alternate(&mut self) {
@@ -466,6 +473,7 @@ impl<'a> Parser<'a> {
                 self.push_token(Token::ZeroOrMore);
             } else {
                 // this is just `**/....`
+                self.contains_recursive_prefix = true;
                 self.push_token(Token::RecursivePrefix);
                 assert!(self.bump().is_none_or(is_separator));
             }
@@ -644,7 +652,7 @@ mod tests {
         #[case] glob_regex: &str,
         #[case] directory_match_regex: &str,
     ) {
-        let (glob_re, directory_match_re) = parse(glob).unwrap();
+        let (glob_re, directory_match_re, _) = parse(glob).unwrap();
         // All our regexes come with a fixed prefix and suffix, just assert and drop them
         fn strip_overhead(s: String) -> String {
             assert!(s.starts_with("(?-u)^"));

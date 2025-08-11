@@ -27,6 +27,10 @@ pub struct Glob {
     regex: Regex,
     #[turbo_tasks(trace_ignore)]
     directory_match_regex: Regex,
+
+    // TODO We don't want `../foo` to match against regexes starting with `**`. This is not a very
+    // elegant solution, but it works for now.
+    contains_recursive_prefix: bool,
 }
 impl PartialEq for Glob {
     fn eq(&self, other: &Self) -> bool {
@@ -56,12 +60,18 @@ impl TryFrom<GlobForm> for Glob {
 impl Glob {
     // Returns true if the glob matches the given path.
     pub fn matches(&self, path: &str) -> bool {
+        if self.contains_recursive_prefix && (path == ".." || path.starts_with("../")) {
+            return false;
+        }
         self.regex.is_match(path.as_bytes())
     }
 
     // Returns true if the glob might match a filename underneath this `path` where the
     // path represents a directory.
     pub fn can_match_in_directory(&self, path: &str) -> bool {
+        if self.contains_recursive_prefix && (path == ".." || path.starts_with("../")) {
+            return false;
+        }
         debug_assert!(
             !path.ends_with('/'),
             "Path should be a directory name and not end with /"
@@ -70,7 +80,7 @@ impl Glob {
     }
 
     pub fn parse(input: &str) -> Result<Glob> {
-        let (glob_re, directory_match_re) = parse(input)?;
+        let (glob_re, directory_match_re, contains_recursive_prefix) = parse(input)?;
         let regex = new_regex(glob_re.as_str());
         let directory_match_regex = new_regex(directory_match_re.as_str());
 
@@ -78,6 +88,7 @@ impl Glob {
             glob: input.to_string(),
             regex,
             directory_match_regex,
+            contains_recursive_prefix,
         })
     }
 }
@@ -210,6 +221,7 @@ mod tests {
         "**/next/dist/esm/*.shared-runtime.js",
         "next/dist/shared/lib/app-router-context.shared-runtime.js"
     )]
+    #[case::star_parent("**/*.js", "../foo.js")]
     fn glob_not_matching(#[case] glob: &str, #[case] path: &str) {
         let glob = Glob::parse(glob).unwrap();
 
@@ -239,6 +251,10 @@ mod tests {
     #[rstest]
     #[case::dir_and_file_partial("dir/file.js", "dir/file.js")] // even if there was a dir, named `file.js` we know the glob wasn't intended to match it.
     #[case::alternatives_chars("[abc]", "b")]
+    #[case::outside("..dir/file.js", "..")]
+    #[case::star_parent("**", "..")]
+    #[case::star_parent("**/*.js", "..")]
+    #[case::star_parent("{**/*.js,**/*.ts}", "..")]
     fn glob_not_can_match_directory(#[case] glob: &str, #[case] path: &str) {
         let glob = Glob::parse(glob).unwrap();
 
