@@ -24,11 +24,9 @@ describe('build trace with extra entries in monorepo', () => {
           join(appDir, '.next/server/app/route1/route.js.nft.json')
         )
 
-        expect(
-          appDirRoute1Trace.files.some(
-            (file) => file === '../../../../../other/included.txt'
-          )
-        ).toBe(true)
+        expect(appDirRoute1Trace.files).toContain(
+          '../../../../../other/included.txt'
+        )
       })
     }
   )
