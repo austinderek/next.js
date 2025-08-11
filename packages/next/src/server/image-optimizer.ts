@@ -236,7 +236,6 @@ export async function detectContentType(
   let format: import('sharp').Metadata['format'] | undefined
   format = detector(buffer)
 
-  console.log('found format', format)
   if (!format) {
     const sharp = getSharp(null)
     const meta = await sharp(buffer)
