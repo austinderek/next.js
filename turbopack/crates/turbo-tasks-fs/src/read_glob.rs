@@ -4,16 +4,18 @@ use rustc_hash::FxHashMap;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{Completion, ResolvedVc, TryJoinIterExt, Vc};
 
-use crate::{DirectoryContent, DirectoryEntry, FileSystem, FileSystemPath, glob::Glob};
+use crate::{
+    DirectoryContent, DirectoryEntry, FileSystem, FileSystemPath, LinkContent, LinkType, glob::Glob,
+};
 
 #[turbo_tasks::value]
 #[derive(Default, Debug)]
 pub struct ReadGlobResult {
-    pub results: FxHashMap<String, DirectoryEntry>,
-    pub inner: FxHashMap<String, ResolvedVc<ReadGlobResult>>,
+    pub results: FxHashMap<RcStr, DirectoryEntry>,
+    pub inner: FxHashMap<RcStr, ResolvedVc<ReadGlobResult>>,
 }
 
-/// Reads matches of a glob pattern.
+/// Reads matches of a glob pattern. Symlinks are not resolved (and returned as-is)
 ///
 /// DETERMINISM: Result is in random order. Either sort result or do not depend
 /// on the order.
@@ -40,29 +42,64 @@ async fn read_glob_internal(
     let dir = directory.read_dir().await?;
     let mut result = ReadGlobResult::default();
     let glob_value = glob.await?;
+    let handle_file = |result: &mut ReadGlobResult,
+                       entry_path: &RcStr,
+                       segment: &RcStr,
+                       entry: &DirectoryEntry| {
+        if glob_value.matches(entry_path) {
+            result.results.insert(segment.clone(), entry.clone());
+        }
+    };
+    let handle_dir = async |result: &mut ReadGlobResult,
+                            entry_path: RcStr,
+                            segment: &RcStr,
+                            path: &FileSystemPath| {
+        if glob_value.can_match_in_directory(&entry_path) {
+            result.inner.insert(
+                segment.clone(),
+                read_glob_inner(entry_path, path.clone(), glob)
+                    .to_resolved()
+                    .await?,
+            );
+        }
+        anyhow::Ok(())
+    };
+
     match &*dir {
         DirectoryContent::Entries(entries) => {
             for (segment, entry) in entries.iter() {
-                // This is redundant with logic inside of `read_dir` but here we track it separately
-                // so we don't follow symlinks.
+                // Ensure that there are no infinite loops, but don't resolve
+                resolve_symlink_safely(entry.clone()).await?;
+
                 let entry_path: RcStr = if prefix.is_empty() {
                     segment.clone()
                 } else {
                     format!("{prefix}/{segment}").into()
                 };
-                let entry = resolve_symlink_safely(entry.clone()).await?;
-                if glob_value.matches(&entry_path) {
-                    result.results.insert(entry_path.to_string(), entry.clone());
-                }
-                if let DirectoryEntry::Directory(path) = entry
-                    && glob_value.can_match_in_directory(&entry_path)
-                {
-                    result.inner.insert(
-                        entry_path.to_string(),
-                        read_glob_inner(entry_path, path.clone(), glob)
-                            .to_resolved()
-                            .await?,
-                    );
+
+                match entry {
+                    DirectoryEntry::File(_) => {
+                        handle_file(&mut result, &entry_path, segment, entry);
+                    }
+                    DirectoryEntry::Directory(path) => {
+                        // Add the directory to `results` if it is a whole match of the glob
+                        handle_file(&mut result, &entry_path, segment, entry);
+                        // Recursively handle the directory
+                        handle_dir(&mut result, entry_path, segment, path).await?;
+                    }
+                    DirectoryEntry::Symlink(path) => {
+                        if let LinkContent::Link { link_type, .. } = &*path.read_link().await? {
+                            if link_type.contains(LinkType::DIRECTORY) {
+                                // Add the directory to `results` if it is a whole match of the glob
+                                handle_file(&mut result, &entry_path, segment, entry);
+                                // Recursively handle the directory
+                                handle_dir(&mut result, entry_path, segment, path).await?;
+                            } else {
+                                handle_file(&mut result, &entry_path, segment, entry);
+                            }
+                        }
+                    }
+                    DirectoryEntry::Other(_) | DirectoryEntry::Error => continue,
                 }
             }
         }
@@ -71,7 +108,7 @@ async fn read_glob_internal(
     Ok(ReadGlobResult::cell(result))
 }
 
-// Resolve a symlink checking for recursion.
+/// Resolve a symlink checking for recursion.
 async fn resolve_symlink_safely(entry: DirectoryEntry) -> Result<DirectoryEntry> {
     let resolved_entry = entry.clone().resolve_symlink().await?;
     if resolved_entry != entry && matches!(&resolved_entry, DirectoryEntry::Directory(_)) {

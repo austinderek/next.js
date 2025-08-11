@@ -1249,6 +1249,8 @@ impl FileSystemPath {
         Ok(None)
     }
 
+    /// DETERMINISM: Result is in random order. Either sort result or do not depend
+    /// on the order.
     pub fn read_glob(&self, glob: Vc<Glob>) -> Vc<ReadGlobResult> {
         read_glob(self.clone(), glob)
     }
