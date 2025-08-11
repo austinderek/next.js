@@ -68,9 +68,6 @@ async fn read_glob_internal(
     match &*dir {
         DirectoryContent::Entries(entries) => {
             for (segment, entry) in entries.iter() {
-                // Ensure that there are no infinite loops, but don't resolve
-                resolve_symlink_safely(entry.clone()).await?;
-
                 let entry_path: RcStr = if prefix.is_empty() {
                     segment.clone()
                 } else {
@@ -90,6 +87,9 @@ async fn read_glob_internal(
                     DirectoryEntry::Symlink(path) => {
                         if let LinkContent::Link { link_type, .. } = &*path.read_link().await? {
                             if link_type.contains(LinkType::DIRECTORY) {
+                                // Ensure that there are no infinite link loops, but don't resolve
+                                resolve_symlink_safely(entry.clone()).await?;
+
                                 // Add the directory to `results` if it is a whole match of the glob
                                 handle_file(&mut result, &entry_path, segment, entry);
                                 // Recursively handle the directory
