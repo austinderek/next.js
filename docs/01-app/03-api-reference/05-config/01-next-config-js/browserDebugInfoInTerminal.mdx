@@ -6,10 +6,7 @@ version: experimental
 
 The `experimental.browserDebugInfoInTerminal` option forwards console output and runtime errors originating in the browser to the dev server terminal.
 
-> **Good to know**:
->
-> - It is disabled by default.
-> - When enabled, it works in development mode only.
+This option is disabled by default. When enabled it only works in development mode.
 
 ## Usage
 
@@ -39,8 +36,6 @@ module.exports = nextConfig
 ```
 
 ### Serialization limits
-
-When browser logs are serialized for the terminal, circular references are handled safely and displayed as `[Circular]`.
 
 Deeply nested objects/arrays are truncated using **sensible defaults**. You can tweak these limits:
 
@@ -108,3 +103,7 @@ const nextConfig = {
 
 module.exports = nextConfig
 ```
+
+| Version   | Changes                                              |
+| --------- | ---------------------------------------------------- |
+| `v15.4.0` | experimental `browserDebugInfoInTerminal` introduced |
