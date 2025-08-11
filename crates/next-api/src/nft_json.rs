@@ -102,6 +102,7 @@ async fn apply_includes(
     glob: Vc<Glob>,
     ident_folder: &FileSystemPath,
 ) -> Result<BTreeSet<RcStr>> {
+    debug_assert_eq!(project_root_path.fs, ident_folder.fs);
     // Read files matching the glob pattern from the project root
     let glob_result = project_root_path.read_glob(glob).await?;
 
@@ -118,6 +119,8 @@ async fn apply_includes(
 
             let file_path_ref = file_path;
             // Convert to relative path from ident_folder to the file
+            // unwrap is safe because project_root_path and ident_folder have the same filesystem
+            // and paths produced by read_glob stay in the filesystem
             let relative_path = ident_folder.get_relative_path_to(file_path_ref).unwrap();
             result.insert(relative_path);
         }
