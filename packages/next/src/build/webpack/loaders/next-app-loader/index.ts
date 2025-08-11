@@ -458,13 +458,22 @@ async function createTreeCodeFromPath(
         )
       }
 
+      const seen = new Set()
+
       const modulesCode = `{
         ${definedFilePaths
-          .map(([file, filePath]) => {
+          .reduceRight<string[]>((acc, [file, filePath]) => {
+            if (seen.has(file)) return acc
+
+            seen.add(file)
+
             const varName = `module${nestedCollectedDeclarations.length}`
             nestedCollectedDeclarations.push([varName, filePath])
-            return `'${file}': [${varName}, ${JSON.stringify(filePath)}],`
-          })
+
+            acc.push(`'${file}': [${varName}, ${JSON.stringify(filePath)}],`)
+
+            return acc
+          }, [])
           .join('\n')}
         ${createMetadataExportsCode(metadata)}
       }`
