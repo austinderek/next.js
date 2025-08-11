@@ -289,6 +289,13 @@ export async function detectContentType(
     case 'rad':
     case 'raw':
     case 'v':
+    case 'cur':
+    case 'dds':
+    case 'j2c':
+    case 'ktx':
+    case 'pnm':
+    case 'psd':
+    case 'tga':
     case undefined:
     default:
       return null
