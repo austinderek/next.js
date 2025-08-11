@@ -464,7 +464,7 @@ declare module 'next/dist/compiled/image-size' {
   export = m
 }
 
-declare module 'next/dist/compiled/image-detector' {
+declare module 'next/dist/compiled/image-detector/detector.js' {
   export function detector(arr: Uint8Array): import('sharp').Metadata['format']
 }
 

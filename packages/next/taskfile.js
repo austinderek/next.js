@@ -663,6 +663,8 @@ export async function ncc_image_size(task, opts) {
 // eslint-disable-next-line camelcase
 externals['image-detector'] = 'next/dist/compiled/image-detector'
 export async function ncc_image_detector(task, opts) {
+  // NOTE: remove this special compile step if the upstream PR lands
+  // https://github.com/image-size/image-size/pull/451
   await task
     .source(relative(__dirname, require.resolve('image-size/dist/detector.js')))
     .ncc({ packageName: 'image-size', externals })

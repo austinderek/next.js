@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'http'
 import { mediaType } from 'next/dist/compiled/@hapi/accept'
 import contentDisposition from 'next/dist/compiled/content-disposition'
 import imageSizeOf from 'next/dist/compiled/image-size'
-import imageDetector from 'next/dist/compiled/image-detector'
+import { detector } from 'next/dist/compiled/image-detector/detector.js'
 import isAnimated from 'next/dist/compiled/is-animated'
 import { join } from 'path'
 import nodeUrl, { type UrlWithParsedQuery } from 'url'
@@ -234,7 +234,7 @@ export async function detectContentType(
   }
 
   let format: import('sharp').Metadata['format'] | undefined
-  format = imageDetector.detector(buffer)
+  format = detector(buffer)
 
   console.log('found format', format)
   if (!format) {
