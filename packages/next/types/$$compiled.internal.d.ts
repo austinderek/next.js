@@ -465,7 +465,29 @@ declare module 'next/dist/compiled/image-size' {
 }
 
 declare module 'next/dist/compiled/image-detector/detector.js' {
-  export function detector(arr: Uint8Array): import('sharp').Metadata['format']
+  export function detector(
+    arr: Uint8Array
+  ):
+    | 'bmp'
+    | 'cur'
+    | 'dds'
+    | 'gif'
+    | 'heif'
+    | 'icns'
+    | 'ico'
+    | 'j2c'
+    | 'jp2'
+    | 'jpg'
+    | 'jxl'
+    | 'jxl-stream'
+    | 'ktx'
+    | 'png'
+    | 'pnm'
+    | 'psd'
+    | 'svg'
+    | 'tga'
+    | 'tiff'
+    | 'webp'
 }
 
 declare module 'next/dist/compiled/@hapi/accept' {

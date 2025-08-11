@@ -233,7 +233,10 @@ export async function detectContentType(
     return JP2
   }
 
-  let format: import('sharp').Metadata['format'] | undefined
+  let format:
+    | import('sharp').Metadata['format']
+    | ReturnType<typeof detector>
+    | undefined
   format = detector(buffer)
 
   if (!format) {
@@ -259,6 +262,7 @@ export async function detectContentType(
     case 'svg':
       return SVG
     case 'jxl':
+    case 'jxl-stream':
       return JXL
     case 'jp2':
       return JP2
@@ -267,6 +271,12 @@ export async function detectContentType(
       return TIFF
     case 'pdf':
       return PDF
+    case 'bmp':
+      return BMP
+    case 'ico':
+      return ICO
+    case 'icns':
+      return ICNS
     case 'dcraw':
     case 'dz':
     case 'exr':
