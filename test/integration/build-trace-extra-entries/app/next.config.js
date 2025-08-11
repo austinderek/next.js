@@ -19,7 +19,7 @@ module.exports = {
   },
   outputFileTracingIncludes: {
     '/index': ['include-me/**/*'],
-    '/route1': ['./include-me/**/*'],
+    '/route1': ['./include-me/**/*', 'node_modules/pkg-behind-symlink/*'],
     '/*': ['include-me-global.txt'],
   },
   outputFileTracingExcludes: {

@@ -48,6 +48,18 @@ describe('build trace with extra entries', () => {
         expect(
           appDirRoute1Trace.files.some((file) => file.includes('exclude-me'))
         ).toBe(false)
+        expect(appDirRoute1Trace.files).toEqual(
+          expect.arrayContaining([
+            '../../../../node_modules/pkg-behind-symlink/index.js',
+            '../../../../node_modules/pkg-behind-symlink/package.json',
+          ])
+        )
+        // This assertion not really needed, but ensures consistency between Turbopack and Webpack
+        expect(
+          appDirRoute1Trace.files.some((file) =>
+            file.startsWith('../../../../node_modules/pkg/')
+          )
+        ).toBe(false)
 
         expect(
           indexTrace.files.filter(
