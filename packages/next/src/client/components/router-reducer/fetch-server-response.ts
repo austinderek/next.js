@@ -312,11 +312,15 @@ export async function fetchServerResponse(
           const { looksValid, stream } = await peekAndSniff(res.body)
           if (looksValid) {
             isFlightResponse = true
-            // Replace the response body with the unused stream branch
+            // Create a proper response-like object that maintains all required properties and types
             res = {
-              ...res,
+              ok: res.ok,
+              redirected: res.redirected,
+              headers: res.headers,
               body: stream,
-            }
+              status: res.status,
+              url: res.url,
+            } satisfies RSCResponse
           }
         }
       }
