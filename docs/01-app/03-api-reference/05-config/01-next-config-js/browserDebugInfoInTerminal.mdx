@@ -73,7 +73,32 @@ module.exports = nextConfig
 
 ### Source location
 
-Source locations are included by default when this feature is enabled. To suppress them, set `showSourceLocation: false`.
+Source locations are included by default when this feature is enabled.
+
+```tsx filename="app/page.tsx" highlight={8}
+'use client'
+
+export default function Home() {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        console.log('Hello World')
+      }}
+    >
+      Click me
+    </button>
+  )
+}
+```
+
+Clicking the button prints this message to the terminal.
+
+```bash filename="Terminal"
+[browser] Hello World (app/page.tsx:8:17)
+```
+
+To suppress them, set `showSourceLocation: false`.
 
 - **showSourceLocation**: Include source location info when available.
 
