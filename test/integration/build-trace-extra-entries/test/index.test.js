@@ -87,7 +87,6 @@ describe('build trace with extra entries', () => {
         ).toBe(true)
         expect(indexTrace.files).toContain('../../../include-me/hello.txt')
         expect(indexTrace.files).toContain('../../../include-me/second.txt')
-        expect(indexTrace.files).toContain('../../../include-me/hello.txt')
         expect(
           indexTrace.files.some((file) => file.includes('exclude-me'))
         ).toBe(false)

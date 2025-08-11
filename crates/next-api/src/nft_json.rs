@@ -290,6 +290,8 @@ impl Asset for NftJsonAsset {
 /// The globs defined in the next.config.mjs are relative to the project root.
 /// The glob walker in turbopack is somewhat naive so we handle relative path directives first so
 /// traversal doesn't need to consider them and can just traverse 'down' the tree.
+/// The main alternative is to merge glob evaluation with directory traversal which is what the npm
+/// `glob` package does, but this would be a substantial rewrite.`
 fn relativize_glob(glob: &str, relative_to: FileSystemPath) -> Result<(&str, FileSystemPath)> {
     let mut relative_to = relative_to;
     let mut processed_glob = glob;
