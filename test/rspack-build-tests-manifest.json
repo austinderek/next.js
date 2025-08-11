@@ -1720,6 +1720,15 @@
     "flakey": [],
     "runtimeError": false
   },
+  "test/e2e/app-dir/cache-components-bot-ua/cache-components-bot-ua.test.ts": {
+    "passed": [
+      "cache-components PPR bot static generation bypass should bypass static generation for DOM bot requests to avoid SSG_BAILOUT"
+    ],
+    "failed": [],
+    "pending": [],
+    "flakey": [],
+    "runtimeError": false
+  },
   "test/e2e/app-dir/cache-components-create-component-tree/cache-components-create-component-tree.test.ts": {
     "passed": [
       "hello-world should not indicate there is an error when incidental math.random calls occur during component tree generation during build"
@@ -18875,7 +18884,10 @@
     "runtimeError": false
   },
   "test/production/adapter-config/adapter-config.test.ts": {
-    "passed": ["adapter-config should apply modifyConfig from adapter"],
+    "passed": [
+      "adapter-config should apply modifyConfig from adapter",
+      "adapter-config should call onBuildComplete with correct context"
+    ],
     "failed": [],
     "pending": [],
     "flakey": [],
@@ -20101,11 +20113,10 @@
   },
   "test/production/pnpm-support/index.test.ts": {
     "passed": [
-      "pnpm support should build with dependencies installed via pnpm"
-    ],
-    "failed": [
+      "pnpm support should build with dependencies installed via pnpm",
       "pnpm support should execute client-side JS on each page in output: \"standalone\""
     ],
+    "failed": [],
     "pending": [],
     "flakey": [],
     "runtimeError": false
