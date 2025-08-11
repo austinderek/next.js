@@ -2316,7 +2316,6 @@ export default async function getBaseWebpackConfig(
     basePath: config.basePath,
     excludeDefaultMomentLocales: config.excludeDefaultMomentLocales,
     assetPrefix: config.assetPrefix,
-    deploymentId: config.deploymentId,
     disableOptimizedLoading,
     isEdgeRuntime: isEdgeServer,
     reactProductionProfiling,
