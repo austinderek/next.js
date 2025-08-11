@@ -21,7 +21,7 @@ env:
   MACOSX_DEPLOYMENT_TARGET: 11.0
   # This will become "true" if the latest commit (merged release PR) is either:
   # - "Version Packages (#<number>)"
-  # - "Version Pacakges (canary/rc) (#<number>)"
+  # - "Version Packages (canary/rc) (#<number>)"
   # set from scripts/check-is-release.js
   __NEW_RELEASE: 'false'
 
