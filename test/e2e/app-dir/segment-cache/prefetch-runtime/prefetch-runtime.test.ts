@@ -682,7 +682,7 @@ describe('<Link prefetch={true}> (runtime prefetch)', () => {
       {
         // If a cache has an expiration time under 5min (DYNAMIC_EXPIRE), we omit it from static prerenders.
         // However, it should still be included in a runtime prefetch if its stale time is >=30s. (RUNTIME_PREFETCH_DYNAMIC_STALE)
-        // `cacheLife("seconds")` is deliberately set to have a stale time of 30s to stay above this treshold.
+        // `cacheLife("seconds")` is deliberately set to have a stale time of 30s to stay above this threshold.
         description: 'includes public caches with cacheLife("seconds")',
         staticContent: 'This page uses a short-lived public cache',
         path: '/caches/public-seconds',
@@ -690,7 +690,7 @@ describe('<Link prefetch={true}> (runtime prefetch)', () => {
       {
         // A Private cache will always be omitted from static prerenders.
         // However, it should still be included in a runtime prefetch if its stale time is >=30s. (RUNTIME_PREFETCH_DYNAMIC_STALE)
-        // `cacheLife("seconds")` is deliberately set to have a stale time of 30s to stay above this treshold.
+        // `cacheLife("seconds")` is deliberately set to have a stale time of 30s to stay above this threshold.
         description: 'includes private caches with cacheLife("seconds")',
         staticContent: 'This page uses a short-lived private cache',
         path: '/caches/private-seconds',

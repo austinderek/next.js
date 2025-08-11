@@ -408,7 +408,7 @@ describe('segment cache (incremental opt in)', () => {
 
       // Then initiate a prefetch for the PPR-enabled route.
       await act(async () => {
-        // Create an inner act scope so we initate a prefetch but block it
+        // Create an inner act scope so we initiate a prefetch but block it
         // from responding.
         await act(
           async () => {
