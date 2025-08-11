@@ -500,6 +500,7 @@ export interface ExperimentalConfig {
   nextScriptWorkers?: boolean
   scrollRestoration?: boolean
   externalDir?: boolean
+  /** @deprecated built-in amp support will be removed in Next 16 */
   amp?: {
     optimizer?: any
     validator?: string
@@ -1146,7 +1147,10 @@ export interface NextConfig extends Record<string, any> {
     pagesBufferLength?: number
   }
 
-  /** @see [`next/amp`](https://nextjs.org/docs/api-reference/next/amp) */
+  /**
+   * @deprecated built-in amp support will be removed in Next 16
+   * @see [`next/amp`](https://nextjs.org/docs/api-reference/next/amp)
+   */
   amp?: {
     canonicalBase?: string
   }

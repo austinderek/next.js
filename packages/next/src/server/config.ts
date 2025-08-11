@@ -503,6 +503,26 @@ function assignDefaults(
     }
   }
 
+  // There are a good amount of test fixtures that have amp enabled
+  // that also assert on stderr output being empty, so we're gating the
+  // warning to be skipped when running in Next.js tests until we fully
+  // remove the feature.
+  if (!process.env.__NEXT_TEST_MODE) {
+    warnOptionHasBeenDeprecated(
+      result,
+      'amp',
+      `Built-in amp support is being deprecated and the \`amp\` configuration option will be removed in Next 16.`,
+      silent
+    )
+
+    warnOptionHasBeenDeprecated(
+      result,
+      'experimental.amp',
+      `Built-in amp support is being deprecated and the \`experimental.amp\` configuration option will be removed in Next 16.`,
+      silent
+    )
+  }
+
   warnCustomizedOption(
     result,
     'experimental.esmExternals',
