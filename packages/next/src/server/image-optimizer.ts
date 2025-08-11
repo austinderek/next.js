@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'http'
 import { mediaType } from 'next/dist/compiled/@hapi/accept'
 import contentDisposition from 'next/dist/compiled/content-disposition'
 import imageSizeOf from 'next/dist/compiled/image-size'
+import imageDetector from 'next/dist/compiled/image-detector'
 import isAnimated from 'next/dist/compiled/is-animated'
 import { join } from 'path'
 import nodeUrl, { type UrlWithParsedQuery } from 'url'
@@ -232,11 +233,19 @@ export async function detectContentType(
     return JP2
   }
 
-  const sharp = getSharp(null)
-  const meta = await sharp(buffer)
-    .metadata()
-    .catch((_) => null)
-  switch (meta?.format) {
+  let format: import('sharp').Metadata['format'] | undefined
+  format = imageDetector.detector(buffer)
+
+  console.log('found format', format)
+  if (!format) {
+    const sharp = getSharp(null)
+    const meta = await sharp(buffer)
+      .metadata()
+      .catch((_) => null)
+    format = meta?.format
+  }
+
+  switch (format) {
     case 'avif':
       return AVIF
     case 'webp':

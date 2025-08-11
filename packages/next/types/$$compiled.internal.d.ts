@@ -464,6 +464,10 @@ declare module 'next/dist/compiled/image-size' {
   export = m
 }
 
+declare module 'next/dist/compiled/image-detector' {
+  export function detector(arr: Uint8Array): import('sharp').Metadata['format']
+}
+
 declare module 'next/dist/compiled/@hapi/accept' {
   import m from '@hapi/accept'
   export = m
