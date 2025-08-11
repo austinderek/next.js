@@ -29,6 +29,33 @@ describe('next/font/local loader', () => {
       `)
     })
 
+    test('with dpl query string', async () => {
+      const { css } = await nextFontLocalFontLoader({
+        functionName: '',
+        deploymentId: 'dpl_123',
+        data: [{ src: './my-font.woff2' }],
+        emitFontFile: () => '/_next/static/media/my-font.woff2',
+        resolve: jest.fn(),
+        isDev: false,
+        isServer: true,
+        variableName: 'myFont',
+        loaderContext: {
+          fs: {
+            readFile: (_: string, cb: any) => cb(null, 'fontdata'),
+          },
+        } as any,
+      })
+
+      expect(css).toMatchInlineSnapshot(`
+        "@font-face {
+        font-family: myFont;
+        src: url(/_next/static/media/my-font.woff2?dpl=dpl_123) format('woff2');
+        font-display: swap;
+        }
+        "
+      `)
+    })
+
     test('Weight and style', async () => {
       const { css } = await nextFontLocalFontLoader({
         functionName: '',
