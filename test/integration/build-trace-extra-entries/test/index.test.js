@@ -35,16 +35,12 @@ describe('build trace with extra entries', () => {
           join(appDir, '.next/server/app/route1/route.js.nft.json')
         )
 
-        expect(
-          appDirRoute1Trace.files.some(
-            (file) => file === '../../../../include-me/hello.txt'
-          )
-        ).toBe(true)
-        expect(
-          appDirRoute1Trace.files.some(
-            (file) => file === '../../../../include-me/second.txt'
-          )
-        ).toBe(true)
+        expect(appDirRoute1Trace.files).toContain(
+          '../../../../include-me/hello.txt'
+        )
+        expect(appDirRoute1Trace.files).toContain(
+          '../../../../include-me/second.txt'
+        )
         expect(
           appDirRoute1Trace.files.some((file) => file.includes('exclude-me'))
         ).toBe(false)
@@ -89,16 +85,8 @@ describe('build trace with extra entries', () => {
         expect(
           indexTrace.files.some((file) => file.includes('some-cms/index.js'))
         ).toBe(true)
-        expect(
-          indexTrace.files.some(
-            (file) => file === '../../../include-me/hello.txt'
-          )
-        ).toBe(true)
-        expect(
-          indexTrace.files.some(
-            (file) => file === '../../../include-me/second.txt'
-          )
-        ).toBe(true)
+        expect(indexTrace.files).toContain('../../../include-me/hello.txt')
+        expect(indexTrace.files).toContain('../../../include-me/second.txt')
         expect(
           indexTrace.files.some((file) => file.includes('exclude-me'))
         ).toBe(false)

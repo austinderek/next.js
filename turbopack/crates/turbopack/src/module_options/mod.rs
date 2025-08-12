@@ -162,15 +162,17 @@ impl ModuleOptions {
         // only then be processed with Webpack/PostCSS).
         //
         // Note that this is not an exhaustive condition for PostCSS/Webpack, but excludes certain
-        // cases, so it should be added conjunctively together with the `module_css_condition` rule.
+        // cases, so it should be added conjunctively together with CSS Module rule.
         //
         // If module css, then only when (Inner or Analyze or Compose)
         // <=> (not (module css)) or (Inner or Analyzer or Compose)
-        let module_css_external_transform_conditions = vec![
+        //
+        // So only if this is not a CSS module, or one of the special reference type constraints.
+        let module_css_external_transform_conditions = RuleCondition::Any(vec![
+            RuleCondition::not(module_css_condition.clone()),
             RuleCondition::ReferenceType(ReferenceType::Css(CssReferenceSubType::Inner)),
             RuleCondition::ReferenceType(ReferenceType::Css(CssReferenceSubType::Analyze)),
-            RuleCondition::ReferenceType(ReferenceType::Css(CssReferenceSubType::Compose)),
-        ];
+        ]);
 
         let mut ts_preprocess = vec![];
         let mut ecma_preprocess = vec![];
@@ -505,22 +507,14 @@ impl ModuleOptions {
                 };
 
                 rules.push(ModuleRule::new(
-                    RuleCondition::Any(vec![
-                        RuleCondition::All(vec![
-                            RuleCondition::Any(vec![
-                                RuleCondition::ResourcePathEndsWith(".css".to_string()),
-                                RuleCondition::ContentTypeStartsWith("text/css".to_string()),
-                            ]),
-                            RuleCondition::not(module_css_condition.clone()),
+                    RuleCondition::All(vec![
+                        RuleCondition::Any(vec![
+                            // Both CSS and CSS Modules
+                            RuleCondition::ResourcePathEndsWith(".css".to_string()),
+                            RuleCondition::ContentTypeStartsWith("text/css".to_string()),
+                            module_css_condition.clone(),
                         ]),
-                        RuleCondition::All(
-                            [
-                                vec![module_css_condition.clone()],
-                                // see comment on module_css_external_transform_conditions
-                                module_css_external_transform_conditions.clone(),
-                            ]
-                            .concat(),
-                        ),
+                        module_css_external_transform_conditions.clone(),
                     ]),
                     vec![ModuleRuleEffect::SourceTransforms(ResolvedVc::cell(vec![
                         ResolvedVc::upcast(
@@ -703,14 +697,7 @@ impl ModuleOptions {
                             RuleCondition::ResourceBasePathGlob(Glob::new(key.clone()).await?)
                         },
                         RuleCondition::not(RuleCondition::ResourceIsVirtualSource),
-                        // see comment on module_css_external_transform_conditions
-                        RuleCondition::Any(
-                            [
-                                vec![RuleCondition::not(module_css_condition.clone())],
-                                module_css_external_transform_conditions.clone(),
-                            ]
-                            .concat(),
-                        ),
+                        module_css_external_transform_conditions.clone(),
                     ]),
                     vec![ModuleRuleEffect::SourceTransforms(ResolvedVc::cell(vec![
                         ResolvedVc::upcast(
