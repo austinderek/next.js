@@ -181,7 +181,12 @@ impl Asset for NftJsonAsset {
                                 if let Some(pattern_str) = pattern.as_str() {
                                     let (glob, root) =
                                         relativize_glob(pattern_str, project_path.clone())?;
-                                    combined_excludes.insert(format!("{root}/{glob}"));
+                                    let glob = if root.path.is_empty() {
+                                        glob.to_string()
+                                    } else {
+                                        format!("{root}/{glob}")
+                                    };
+                                    combined_excludes.insert(glob);
                                 }
                             }
                         }
