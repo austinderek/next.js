@@ -158,8 +158,13 @@ async function writeToCacheDir(
  * https://en.wikipedia.org/wiki/List_of_file_signatures
  */
 export async function detectContentType(
-  buffer: Buffer
+  buffer: Buffer,
+  skipMetadata?: boolean | null | undefined,
+  concurrency?: number | null | undefined
 ): Promise<string | null> {
+  if (buffer.byteLength === 0) {
+    return null
+  }
   if ([0xff, 0xd8, 0xff].every((b, i) => buffer[i] === b)) {
     return JPEG
   }
@@ -239,8 +244,8 @@ export async function detectContentType(
     | undefined
   format = detector(buffer)
 
-  if (!format) {
-    const sharp = getSharp(null)
+  if (!format && !skipMetadata) {
+    const sharp = getSharp(concurrency)
     const meta = await sharp(buffer)
       .metadata()
       .catch((_) => null)
@@ -776,6 +781,7 @@ export async function imageOptimizer(
       | 'imgOptConcurrency'
       | 'imgOptMaxInputPixels'
       | 'imgOptSequentialRead'
+      | 'imgOptSkipMetadata'
       | 'imgOptTimeoutInSeconds'
     >
     images: Pick<
@@ -803,7 +809,11 @@ export async function imageOptimizer(
     getMaxAge(imageUpstream.cacheControl)
   )
 
-  const upstreamType = await detectContentType(upstreamBuffer)
+  const upstreamType = await detectContentType(
+    upstreamBuffer,
+    nextConfig.experimental.imgOptSkipMetadata,
+    nextConfig.experimental.imgOptConcurrency
+  )
 
   if (
     !upstreamType ||

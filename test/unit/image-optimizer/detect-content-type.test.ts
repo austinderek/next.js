@@ -6,6 +6,12 @@ import { join } from 'path'
 const getImage = (filepath) => readFile(join(__dirname, filepath))
 
 describe('detectContentType', () => {
+  it('should return null for empty buffer', async () => {
+    expect(await detectContentType(Buffer.alloc(0))).toBe(null)
+  })
+  it('should return null for unrecognized buffer', async () => {
+    expect(await detectContentType(Buffer.from([0xa, 0xb, 0xc]))).toBe(null)
+  })
   it('should return jpg', async () => {
     const buffer = await getImage('./images/test.jpg')
     expect(await detectContentType(buffer)).toBe('image/jpeg')
