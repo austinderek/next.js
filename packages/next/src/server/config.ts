@@ -511,14 +511,14 @@ function assignDefaults(
     warnOptionHasBeenDeprecated(
       result,
       'amp',
-      `Built-in amp support is being deprecated and the \`amp\` configuration option will be removed in Next 16.`,
+      `Built-in amp support is deprecated and the \`amp\` configuration option will be removed in Next.js 16.`,
       silent
     )
 
     warnOptionHasBeenDeprecated(
       result,
       'experimental.amp',
-      `Built-in amp support is being deprecated and the \`experimental.amp\` configuration option will be removed in Next 16.`,
+      `Built-in amp support is deprecated and the \`experimental.amp\` configuration option will be removed in Next.js 16.`,
       silent
     )
   }
