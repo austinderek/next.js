@@ -299,7 +299,7 @@ fn relativize_glob(glob: &str, relative_to: FileSystemPath) -> Result<(&str, Fil
     let mut relative_to = relative_to;
     let mut processed_glob = glob;
     loop {
-        if processed_glob.starts_with("../") {
+        if let Some(stripped) = processed_glob.strip_prefix("../") {
             if relative_to.path.is_empty() {
                 bail!(
                     "glob '{glob}' is invalid, it has a prefix that navigates out of the project \
@@ -307,9 +307,9 @@ fn relativize_glob(glob: &str, relative_to: FileSystemPath) -> Result<(&str, Fil
                 );
             }
             relative_to = relative_to.parent();
-            processed_glob = &processed_glob[3..];
-        } else if processed_glob.starts_with("./") {
-            processed_glob = &processed_glob[2..];
+            processed_glob = stripped;
+        } else if let Some(stripped) = processed_glob.strip_prefix("./") {
+            processed_glob = stripped;
         } else {
             break;
         }
