@@ -486,6 +486,7 @@ async fn process_content(
 
                             ParsingIssue {
                                 msg: err.kind.to_string().into(),
+                                stage: IssueStage::Parse,
                                 source,
                             }
                             .resolved_cell()
@@ -523,6 +524,7 @@ async fn process_content(
                     };
                     ParsingIssue {
                         msg: e.kind.to_string().into(),
+                        stage: IssueStage::Transform,
                         source,
                     }
                     .resolved_cell()
@@ -545,6 +547,7 @@ async fn process_content(
                 };
                 ParsingIssue {
                     msg: e.kind.to_string().into(),
+                    stage: IssueStage::Parse,
                     source,
                 }
                 .resolved_cell()
@@ -597,6 +600,7 @@ impl CssError {
                          least one local class or id."
                     )
                     .into(),
+                    stage: IssueStage::Transform,
                     // TODO: This should include the location of the selector in the file.
                     source: IssueSource::from_source_only(source),
                 }
@@ -696,6 +700,7 @@ fn generate_css_source_map(source_map: &parcel_sourcemap::SourceMap) -> Result<R
 #[turbo_tasks::value]
 struct ParsingIssue {
     msg: RcStr,
+    stage: IssueStage,
     source: IssueSource,
 }
 
@@ -708,12 +713,17 @@ impl Issue for ParsingIssue {
 
     #[turbo_tasks::function]
     fn stage(&self) -> Vc<IssueStage> {
-        IssueStage::Parse.cell()
+        self.stage.clone().cell()
     }
 
     #[turbo_tasks::function]
     fn title(&self) -> Vc<StyledString> {
-        StyledString::Text(rcstr!("Parsing css source code failed")).cell()
+        StyledString::Text(match self.stage {
+            IssueStage::Parse => rcstr!("Parsing CSS source code failed"),
+            IssueStage::Transform => rcstr!("Transforming CSS failed"),
+            _ => rcstr!("CSS processing failed"),
+        })
+        .cell()
     }
 
     #[turbo_tasks::function]
