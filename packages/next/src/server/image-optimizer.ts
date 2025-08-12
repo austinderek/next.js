@@ -159,7 +159,7 @@ async function writeToCacheDir(
  */
 export async function detectContentType(
   buffer: Buffer,
-  skipMetadata?: boolean | null | undefined,
+  skipMetadata: boolean | null | undefined,
   concurrency?: number | null | undefined
 ): Promise<string | null> {
   if (buffer.byteLength === 0) {
