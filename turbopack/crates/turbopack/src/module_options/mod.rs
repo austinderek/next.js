@@ -513,14 +513,11 @@ impl ModuleOptions {
                             ]),
                             RuleCondition::not(module_css_condition.clone()),
                         ]),
-                        RuleCondition::All(
-                            [
-                                vec![module_css_condition.clone()],
-                                // see comment on module_css_external_transform_conditions
-                                module_css_external_transform_conditions.clone(),
-                            ]
-                            .concat(),
-                        ),
+                        RuleCondition::All(vec![
+                            module_css_condition.clone(),
+                            // see comment on module_css_external_transform_conditions
+                            RuleCondition::Any(module_css_external_transform_conditions.clone()),
+                        ]),
                     ]),
                     vec![ModuleRuleEffect::SourceTransforms(ResolvedVc::cell(vec![
                         ResolvedVc::upcast(
