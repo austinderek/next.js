@@ -19,8 +19,6 @@ import { isDeepStrictEqual } from 'util'
 import { type DefineEnvOptions, getDefineEnv } from '../define-env'
 import { getReactCompilerLoader } from '../get-babel-loader-config'
 import type {
-  NapiModuleGraphSnapshot,
-  NapiModuleGraphSnapshots,
   NapiPartialProjectOptions,
   NapiProjectOptions,
   NapiSourceDiagnostic,
@@ -671,14 +669,6 @@ function bindingToApi(
       return napiEntrypointsToRawEntrypoints(napiEndpoints)
     }
 
-    async getEntrypoints() {
-      const napiEndpoints = (await binding.projectEntrypoints(
-        this._nativeProject
-      )) as TurbopackResult<NapiEntrypoints>
-
-      return napiEntrypointsToRawEntrypoints(napiEndpoints)
-    }
-
     entrypointsSubscribe() {
       const subscription = subscribe<TurbopackResult<NapiEntrypoints>>(
         false,
@@ -752,12 +742,6 @@ function bindingToApi(
       )
     }
 
-    moduleGraph(): Promise<TurbopackResult<NapiModuleGraphSnapshot>> {
-      return binding.projectModuleGraph(this._nativeProject) as Promise<
-        TurbopackResult<NapiModuleGraphSnapshot>
-      >
-    }
-
     invalidatePersistentCache(): Promise<void> {
       return binding.projectInvalidatePersistentCache(this._nativeProject)
     }
@@ -809,12 +793,6 @@ function bindingToApi(
       await serverSubscription.next()
       return serverSubscription
     }
-
-    async moduleGraphs(): Promise<TurbopackResult<NapiModuleGraphSnapshots>> {
-      return binding.endpointModuleGraphs(this._nativeEndpoint) as Promise<
-        TurbopackResult<NapiModuleGraphSnapshots>
-      >
-    }
   }
 
   /**
@@ -836,23 +814,21 @@ function bindingToApi(
     if (reactCompilerOptions) {
       const ruleKeys = ['*.ts', '*.js', '*.jsx', '*.tsx']
       if (
-        Object.keys(nextConfig?.turbopack?.rules ?? []).some((key) =>
+        Object.keys(nextConfig?.turbopack?.rules ?? {}).some((key) =>
           ruleKeys.includes(key)
         )
       ) {
         Log.warn(
-          `The React Compiler cannot be enabled automatically because 'turbopack.rules' contains a rule for '*.ts', '*.js', '*.jsx', and '*.tsx'. Remove this rule, or add 'babel-loader' and 'babel-plugin-react-compiler' to the Turbopack configuration manually.`
+          "The React Compiler cannot be enabled automatically because 'turbopack.rules' contains " +
+            "a rule for '*.ts', '*.js', '*.jsx', and '*.tsx'. Remove this rule, or add " +
+            "'babel-loader' and 'babel-plugin-react-compiler' to the Turbopack configuration " +
+            'manually.'
         )
       } else {
-        if (!nextConfig.turbopack) {
-          nextConfig.turbopack = {}
-        }
+        nextConfig.turbopack ??= {}
+        nextConfig.turbopack.rules ??= {}
 
-        if (!nextConfig.turbopack.rules) {
-          nextConfig.turbopack.rules = {}
-        }
-
-        for (const key of ['*.ts', '*.js', '*.jsx', '*.tsx']) {
+        for (const key of ruleKeys) {
           nextConfig.turbopack.rules[key] = {
             browser: {
               foreign: false,
@@ -861,8 +837,8 @@ function bindingToApi(
                   originalNextConfig.experimental.reactCompiler,
                   projectPath,
                   nextConfig.dev,
-                  false,
-                  undefined
+                  /* isServer */ false,
+                  /* reactCompilerExclude */ undefined
                 ),
               ],
             },
@@ -1260,6 +1236,23 @@ async function loadWasm(importPath = '') {
         )
       },
     },
+    expandNextJsTemplate(
+      content: Buffer,
+      templatePath: string,
+      nextPackageDirPath: string,
+      replacements: Record<`VAR_${string}`, string>,
+      injections: Record<string, string>,
+      imports: Record<string, string | null>
+    ): string {
+      return rawBindings.expandNextJsTemplate(
+        content,
+        templatePath,
+        nextPackageDirPath,
+        replacements,
+        injections,
+        imports
+      )
+    },
   }
   return wasmBindings
 }
@@ -1442,6 +1435,23 @@ function loadNative(importPath?: string) {
           return bindings.warnForEdgeRuntime(source, isProduction)
         },
       },
+      expandNextJsTemplate(
+        content: Buffer,
+        templatePath: string,
+        nextPackageDirPath: string,
+        replacements: Record<`VAR_${string}`, string>,
+        injections: Record<string, string>,
+        imports: Record<string, string | null>
+      ): string {
+        return bindings.expandNextJsTemplate(
+          content,
+          templatePath,
+          nextPackageDirPath,
+          replacements,
+          injections,
+          imports
+        )
+      },
     }
     return nativeBindings
   }
@@ -1520,7 +1530,7 @@ export function getBinaryMetadata() {
  *
  */
 export function initCustomTraceSubscriber(traceFileName?: string) {
-  if (swcTraceFlushGuard) {
+  if (!swcTraceFlushGuard) {
     // Wasm binary doesn't support trace emission
     let bindings = loadNative()
     swcTraceFlushGuard = bindings.initCustomTraceSubscriber?.(traceFileName)

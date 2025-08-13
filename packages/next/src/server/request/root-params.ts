@@ -9,9 +9,9 @@ import {
 } from '../app-render/work-async-storage.external'
 import {
   workUnitAsyncStorage,
-  type PrerenderStore,
   type PrerenderStoreLegacy,
   type PrerenderStorePPR,
+  type StaticPrerenderStore,
 } from '../app-render/work-unit-async-storage.external'
 import { makeHangingPromise } from '../dynamic-rendering-utils'
 import type { FallbackRouteParams } from './fallback-params'
@@ -21,11 +21,18 @@ import {
   wellKnownProperties,
 } from '../../shared/lib/utils/reflect-utils'
 import { actionAsyncStorage } from '../app-render/action-async-storage.external'
+import { warnOnce } from '../../build/output/log'
 
 interface CacheLifetime {}
 const CachedParams = new WeakMap<CacheLifetime, Promise<Params>>()
 
+/**
+ * @deprecated import specific root params from `next/root-params` instead.
+ */
 export async function unstable_rootParams(): Promise<Params> {
+  warnOnce(
+    '`unstable_rootParams()` is deprecated and will be removed in an upcoming major release. Import specific root params from `next/root-params` instead.'
+  )
   const workStore = workAsyncStorage.getStore()
   if (!workStore) {
     throw new InvariantError('Missing workStore in unstable_rootParams')
@@ -56,6 +63,7 @@ export async function unstable_rootParams(): Promise<Params> {
         workUnitStore
       )
     case 'private-cache':
+    case 'prerender-runtime':
     case 'request':
       return Promise.resolve(workUnitStore.rootParams)
     default:
@@ -66,7 +74,7 @@ export async function unstable_rootParams(): Promise<Params> {
 function createPrerenderRootParams(
   underlyingParams: Params,
   workStore: WorkStore,
-  prerenderStore: PrerenderStore
+  prerenderStore: StaticPrerenderStore
 ): Promise<Params> {
   switch (prerenderStore.type) {
     case 'prerender-client': {
@@ -87,6 +95,7 @@ function createPrerenderRootParams(
 
             const promise = makeHangingPromise<Params>(
               prerenderStore.renderSignal,
+              workStore.route,
               '`unstable_rootParams`'
             )
             CachedParams.set(underlyingParams, promise)
@@ -201,6 +210,13 @@ export function getRootParam(paramName: string): Promise<ParamValue> {
     throw new InvariantError(`Missing workStore in ${apiName}`)
   }
 
+  const workUnitStore = workUnitAsyncStorage.getStore()
+  if (!workUnitStore) {
+    throw new Error(
+      `Route ${workStore.route} used ${apiName} outside of a Server Component. This is not allowed.`
+    )
+  }
+
   const actionStore = actionAsyncStorage.getStore()
   if (actionStore) {
     if (actionStore.isAppRoute) {
@@ -209,21 +225,15 @@ export function getRootParam(paramName: string): Promise<ParamValue> {
         `Route ${workStore.route} used ${apiName} inside a Route Handler. Support for this API in Route Handlers is planned for a future version of Next.js.`
       )
     }
-    if (actionStore.isAction) {
+    if (actionStore.isAction && workUnitStore.phase === 'action') {
       // Actions are not fundamentally tied to a route (even if they're always submitted from some page),
       // so root params would be inconsistent if an action is called from multiple roots.
+      // Make sure we check if the phase is "action" - we should not error in the rerender
+      // after an action revalidates or updates cookies (which will still have `actionStore.isAction === true`)
       throw new Error(
         `${apiName} was used inside a Server Action. This is not supported. Functions from 'next/root-params' can only be called in the context of a route.`
       )
     }
-  }
-
-  const workUnitStore = workUnitAsyncStorage.getStore()
-
-  if (!workUnitStore) {
-    throw new Error(
-      `Route ${workStore.route} used ${apiName} in Pages Router. This API is only available within App Router.`
-    )
   }
 
   switch (workUnitStore.type) {
@@ -245,6 +255,7 @@ export function getRootParam(paramName: string): Promise<ParamValue> {
       )
     }
     case 'private-cache':
+    case 'prerender-runtime':
     case 'request': {
       break
     }
@@ -258,7 +269,7 @@ export function getRootParam(paramName: string): Promise<ParamValue> {
 function createPrerenderRootParamPromise(
   paramName: string,
   workStore: WorkStore,
-  prerenderStore: PrerenderStore,
+  prerenderStore: StaticPrerenderStore,
   apiName: string
 ): Promise<ParamValue> {
   switch (prerenderStore.type) {
@@ -285,6 +296,7 @@ function createPrerenderRootParamPromise(
       ) {
         return makeHangingPromise<ParamValue>(
           prerenderStore.renderSignal,
+          workStore.route,
           apiName
         )
       }

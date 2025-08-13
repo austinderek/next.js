@@ -358,6 +358,7 @@ export const configSchema: zod.ZodType<NextConfig> = z.lazy(() =>
         clientSegmentCache: z
           .union([z.boolean(), z.literal('client-only')])
           .optional(),
+        clientParamParsing: z.boolean().optional(),
         dynamicOnHover: z.boolean().optional(),
         disableOptimizedLoading: z.boolean().optional(),
         disablePostcssPresetEnv: z.boolean().optional(),
@@ -384,6 +385,7 @@ export const configSchema: zod.ZodType<NextConfig> = z.lazy(() =>
         imgOptTimeoutInSeconds: z.number().int().optional(),
         imgOptMaxInputPixels: z.number().int().optional(),
         imgOptSequentialRead: z.boolean().optional().nullable(),
+        imgOptSkipMetadata: z.boolean().optional().nullable(),
         isrFlushToDisk: z.boolean().optional(),
         largePageDataBytes: z.number().optional(),
         linkNoTouchStart: z.boolean().optional(),

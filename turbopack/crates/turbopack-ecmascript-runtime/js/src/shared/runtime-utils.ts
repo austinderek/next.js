@@ -22,9 +22,20 @@ const REEXPORTED_OBJECTS = Symbol('reexported objects')
 /**
  * Constructs the `__turbopack_context__` object for a module.
  */
-function Context(this: TurbopackBaseContext<Module>, module: Module) {
+function Context(
+  this: TurbopackBaseContext<Module>,
+  module: Module,
+  exports: Exports
+) {
   this.m = module
-  this.e = module.exports
+  // We need to store this here instead of accessing it from the module object to:
+  // 1. Make it available to factories directly, since we rewrite `this` to
+  //    `__turbopack_context__.e` in CJS modules.
+  // 2. Support async modules which rewrite `module.exports` to a promise, so we
+  //    can still access the original exports object from functions like
+  //    `esmExport`
+  // Ideally we could find a new approach for async modules and drop this property altogether.
+  this.e = exports
 }
 const contextPrototype = Context.prototype as TurbopackBaseContext<Module>
 
@@ -89,7 +100,6 @@ function createModuleObject(id: ModuleId): Module {
   return {
     exports: {},
     error: undefined,
-    loaded: false,
     id,
     namespaceObject: undefined,
     [REEXPORTED_OBJECTS]: undefined,
@@ -101,20 +111,24 @@ function createModuleObject(id: ModuleId): Module {
  */
 function esm(
   exports: Exports,
-  getters: Record<string, (() => any) | [() => any, (v: any) => void]>
+  getters: Array<string | (() => unknown) | ((v: unknown) => void)>
 ) {
   defineProp(exports, '__esModule', { value: true })
   if (toStringTag) defineProp(exports, toStringTag, { value: 'Module' })
-  for (const key in getters) {
-    const item = getters[key]
-    if (Array.isArray(item)) {
-      defineProp(exports, key, {
-        get: item[0],
-        set: item[1],
+  let i = 0
+  while (i < getters.length) {
+    const propName = getters[i++] as string
+    // TODO(luke.sandberg): we could support raw values here, but would need a discriminator beyond 'not a function'
+    const getter = getters[i++] as () => unknown
+    if (typeof getters[i] === 'function') {
+      // a setter
+      defineProp(exports, propName, {
+        get: getter,
+        set: getters[i++] as (v: unknown) => void,
         enumerable: true,
       })
     } else {
-      defineProp(exports, key, { get: item, enumerable: true })
+      defineProp(exports, propName, { get: getter, enumerable: true })
     }
   }
   Object.seal(exports)
@@ -125,25 +139,33 @@ function esm(
  */
 function esmExport(
   this: TurbopackBaseContext<Module>,
-  getters: Record<string, () => any>,
+  getters: Array<string | (() => unknown) | ((v: unknown) => void)>,
   id: ModuleId | undefined
 ) {
-  let module = this.m
-  let exports = this.e
+  let module: Module
+  let exports: Module['exports']
   if (id != null) {
     module = getOverwrittenModule(this.c, id)
     exports = module.exports
+  } else {
+    module = this.m
+    exports = this.e
   }
-  module.namespaceObject = module.exports
+  module.namespaceObject = exports
   esm(exports, getters)
 }
 contextPrototype.s = esmExport
 
-function ensureDynamicExports(module: Module, exports: Exports) {
-  let reexportedObjects = module[REEXPORTED_OBJECTS]
+type ReexportedObjects = Record<PropertyKey, unknown>[]
+function ensureDynamicExports(
+  module: Module,
+  exports: Exports
+): ReexportedObjects {
+  let reexportedObjects: ReexportedObjects | undefined =
+    module[REEXPORTED_OBJECTS]
 
   if (!reexportedObjects) {
-    reexportedObjects = module[REEXPORTED_OBJECTS] = []
+    module[REEXPORTED_OBJECTS] = reexportedObjects = []
     module.exports = module.namespaceObject = new Proxy(exports, {
       get(target, prop) {
         if (
@@ -170,6 +192,7 @@ function ensureDynamicExports(module: Module, exports: Exports) {
       },
     })
   }
+  return reexportedObjects
 }
 
 /**
@@ -180,16 +203,19 @@ function dynamicExport(
   object: Record<string, any>,
   id: ModuleId | undefined
 ) {
-  let module = this.m
-  let exports = this.e
+  let module: Module
+  let exports: Module['exports']
   if (id != null) {
     module = getOverwrittenModule(this.c, id)
     exports = module.exports
+  } else {
+    module = this.m
+    exports = this.e
   }
-  ensureDynamicExports(module, exports)
+  const reexportedObjects = ensureDynamicExports(module, exports)
 
   if (typeof object === 'object' && object !== null) {
-    module[REEXPORTED_OBJECTS]!.push(object)
+    reexportedObjects.push(object)
   }
 }
 contextPrototype.j = dynamicExport
@@ -199,9 +225,11 @@ function exportValue(
   value: any,
   id: ModuleId | undefined
 ) {
-  let module = this.m
+  let module: Module
   if (id != null) {
     module = getOverwrittenModule(this.c, id)
+  } else {
+    module = this.m
   }
   module.exports = value
 }
@@ -212,9 +240,11 @@ function exportNamespace(
   namespace: any,
   id: ModuleId | undefined
 ) {
-  let module = this.m
+  let module: Module
   if (id != null) {
     module = getOverwrittenModule(this.c, id)
+  } else {
+    module = this.m
   }
   module.exports = module.namespaceObject = namespace
 }
@@ -246,7 +276,9 @@ function interopEsm(
   ns: EsmNamespaceObject,
   allowExportDefault?: boolean
 ) {
-  const getters: { [s: string]: () => any } = Object.create(null)
+  const getters: Array<string | (() => unknown) | ((v: unknown) => void)> = []
+  // The index of the `default` export if any
+  let defaultLocation = -1
   for (
     let current = raw;
     (typeof current === 'object' || typeof current === 'function') &&
@@ -254,14 +286,22 @@ function interopEsm(
     current = getProto(current)
   ) {
     for (const key of Object.getOwnPropertyNames(current)) {
-      getters[key] = createGetter(raw, key)
+      getters.push(key, createGetter(raw, key))
+      if (defaultLocation === -1 && key === 'default') {
+        defaultLocation = getters.length - 1
+      }
     }
   }
 
   // this is not really correct
   // we should set the `default` getter if the imported module is a `.cjs file`
-  if (!(allowExportDefault && 'default' in getters)) {
-    getters['default'] = () => raw
+  if (!(allowExportDefault && defaultLocation >= 0)) {
+    // Replace the binding with one for the namespace itself in order to preserve iteration order.
+    if (defaultLocation >= 0) {
+      getters[defaultLocation] = () => raw
+    } else {
+      getters.push('default', () => raw)
+    }
   }
 
   esm(ns, getters)
@@ -283,7 +323,6 @@ function esmImport(
   id: ModuleId
 ): Exclude<Module['namespaceObject'], undefined> {
   const module = getOrInstantiateModuleFromParent(id, this.m)
-  if (module.error) throw module.error
 
   // any ES module has to have `module.namespaceObject` defined.
   if (module.namespaceObject) return module.namespaceObject
@@ -325,9 +364,7 @@ function commonJsRequire(
   this: TurbopackBaseContext<Module>,
   id: ModuleId
 ): Exports {
-  const module = getOrInstantiateModuleFromParent(id, this.m)
-  if (module.error) throw module.error
-  return module.exports
+  return getOrInstantiateModuleFromParent(id, this.m).exports
 }
 contextPrototype.r = commonJsRequire
 
@@ -400,6 +437,47 @@ function createPromise<T>() {
     promise,
     resolve: resolve!,
     reject: reject!,
+  }
+}
+
+// Load the CompressedmoduleFactories of a chunk into the `moduleFactories` Map.
+// The CompressedModuleFactories format is
+// - 1 or more module ids
+// - a module factory function
+// So walking this is a little complex but the flat structure is also fast to
+// traverse, we can use `typeof` operators to distinguish the two cases.
+function installCompressedModuleFactories(
+  chunkModules: CompressedModuleFactories,
+  offset: number,
+  moduleFactories: ModuleFactories,
+  newModuleId?: (id: ModuleId) => void
+) {
+  let i = offset
+  while (i < chunkModules.length) {
+    let moduleId = chunkModules[i] as ModuleId
+    let end = i + 1
+    // Find our factory function
+    while (
+      end < chunkModules.length &&
+      typeof chunkModules[end] !== 'function'
+    ) {
+      end++
+    }
+    if (end === chunkModules.length) {
+      throw new Error('malformed chunk format, expected a factory function')
+    }
+    // Each chunk item has a 'primary id' and optional additional ids. If the primary id is already
+    // present we know all the additional ids are also present, so we don't need to check.
+    if (!moduleFactories.has(moduleId)) {
+      const moduleFactoryFn = chunkModules[end] as Function
+      applyModuleFactoryName(moduleFactoryFn)
+      newModuleId?.(moduleId)
+      for (; i < end; i++) {
+        moduleId = chunkModules[i] as ModuleId
+        moduleFactories.set(moduleId, moduleFactoryFn)
+      }
+    }
+    i = end + 1 // end is pointing at the last factory advance to the next id or the end of the array.
   }
 }
 
@@ -610,5 +688,12 @@ function requireStub(_moduleId: ModuleId): never {
 contextPrototype.z = requireStub
 
 type ContextConstructor<M> = {
-  new (module: Module): TurbopackBaseContext<M>
+  new (module: Module, exports: Exports): TurbopackBaseContext<M>
+}
+
+function applyModuleFactoryName(factory: Function) {
+  // Give the module factory a nice name to improve stack traces.
+  Object.defineProperty(factory, 'name', {
+    value: '__TURBOPACK__module__evaluation__',
+  })
 }

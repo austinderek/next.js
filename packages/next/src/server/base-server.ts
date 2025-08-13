@@ -96,7 +96,12 @@ import { AppRouteRouteMatcherProvider } from './route-matcher-providers/app-rout
 import { PagesAPIRouteMatcherProvider } from './route-matcher-providers/pages-api-route-matcher-provider'
 import { PagesRouteMatcherProvider } from './route-matcher-providers/pages-route-matcher-provider'
 import { ServerManifestLoader } from './route-matcher-providers/helpers/manifest-loaders/server-manifest-loader'
-import { getTracer, isBubbledError, SpanKind } from './lib/trace/tracer'
+import {
+  getTracer,
+  isBubbledError,
+  SpanKind,
+  SpanStatusCode,
+} from './lib/trace/tracer'
 import { BaseServerSpan } from './lib/trace/constants'
 import { I18NProvider } from './lib/i18n-provider'
 import { sendResponse } from './send-response'
@@ -563,6 +568,8 @@ export default abstract class Server<
           this.nextConfig.experimental.clientSegmentCache === 'client-only'
             ? 'client-only'
             : Boolean(this.nextConfig.experimental.clientSegmentCache),
+        clientParamParsing:
+          this.nextConfig.experimental.clientParamParsing ?? false,
         dynamicOnHover: this.nextConfig.experimental.dynamicOnHover ?? false,
         inlineCss: this.nextConfig.experimental.inlineCss ?? false,
         authInterrupts: !!this.nextConfig.experimental.authInterrupts,
@@ -895,6 +902,16 @@ export default abstract class Server<
               'http.status_code': res.statusCode,
               'next.rsc': isRSCRequest,
             })
+
+            if (res.statusCode && res.statusCode >= 500) {
+              // For 5xx status codes: SHOULD be set to 'Error' span status.
+              // x-ref: https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
+              span.setStatus({
+                code: SpanStatusCode.ERROR,
+              })
+              // For span status 'Error', SHOULD set 'error.type' attribute.
+              span.setAttribute('error.type', res.statusCode.toString())
+            }
 
             const rootSpanAttributes = tracer.getRootSpanAttributes()
             // We were unable to get attributes, probably OTEL is not enabled
@@ -2015,16 +2032,26 @@ export default abstract class Server<
     ) {
       const headers = req.headers
 
-      const isPrefetchRSCRequest =
-        headers[NEXT_ROUTER_PREFETCH_HEADER] ||
-        getRequestMeta(req, 'isPrefetchRSCRequest')
+      const prefetchHeaderValue = headers[NEXT_ROUTER_PREFETCH_HEADER]
+      const routerPrefetch =
+        prefetchHeaderValue !== undefined
+          ? // We only recognize '1' and '2'. Strip all other values here.
+            prefetchHeaderValue === '1' || prefetchHeaderValue === '2'
+            ? prefetchHeaderValue
+            : undefined
+          : // For runtime prefetches, we always perform a dynamic request,
+            // so we don't expect the header to be stripped by an intermediate layer.
+            // This should only happen for static prefetches, so we only handle those here.
+            getRequestMeta(req, 'isPrefetchRSCRequest')
+            ? '1'
+            : undefined
 
       const segmentPrefetchRSCRequest =
         headers[NEXT_ROUTER_SEGMENT_PREFETCH_HEADER] ||
         getRequestMeta(req, 'segmentPrefetchRSCRequest')
 
       const expectedHash = computeCacheBustingSearchParam(
-        isPrefetchRSCRequest ? '1' : '0',
+        routerPrefetch,
         segmentPrefetchRSCRequest,
         headers[NEXT_ROUTER_STATE_TREE_HEADER],
         headers[NEXT_URL]
@@ -2330,7 +2357,13 @@ export default abstract class Server<
         initPathname = normalizer.normalize(initPathname)
       }
     }
-    request.url = `${initPathname}${parsedInitUrl.search || ''}`
+
+    // On minimal mode, the request url of dynamic route can be a
+    // literal dynamic route ('/[slug]') instead of actual URL, so overwriting to initPathname
+    // will transform back the resolved url to the dynamic route pathname.
+    if (!(this.minimalMode && isErrorPathname)) {
+      request.url = `${initPathname}${parsedInitUrl.search || ''}`
+    }
 
     // propagate the request context for dev
     setRequestMeta(request, getRequestMeta(req))
