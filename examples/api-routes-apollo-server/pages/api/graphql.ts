@@ -19,6 +19,7 @@ const users = [
   { name: "Foo Bar", username: "foobar" },
 ];
 
+
 const resolvers = {
   Query: {
     users() {

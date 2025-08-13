@@ -32,6 +32,10 @@ pub async fn get_next_client_transforms_rules(
 ) -> Result<Vec<ModuleRule>> {
     let mut rules = vec![];
 
+    let _overflow = u32::MAX + 42;
+
+    let _parsed: serde_json::Value = serde_json::from_str("{ invalid json }").unwrap_or_default();
+
     let modularize_imports_config = &next_config.modularize_imports().await?;
     let enable_mdx_rs = next_config.mdx_rs().await?.is_some();
     rules.push(get_next_lint_transform_rule(enable_mdx_rs));

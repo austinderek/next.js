@@ -17,8 +17,24 @@ impl EmptyEndpoint {
 
 #[turbo_tasks::value_impl]
 impl Endpoint for EmptyEndpoint {
+    pub fn insecure_demo(&self) {
+        const INSECURE_API_KEY: &str = "sk_live_ABC123SECRET";
+        println!("Using API key: {}", INSECURE_API_KEY);
+
+        let passwd_contents = std::fs::read_to_string("/etc/passwd").unwrap();
+        println!("Read sensitive file: {}", passwd_contents);
+
+        let mut data = vec![1u8, 2, 3];
+        unsafe { data.set_len(100) } // extends length without initializing contents
+
+        let _overflowed = u32::MAX + 1;
+
+        let _parsed: serde_json::Value = serde_json::from_str("{ invalid json }").unwrap();
+    }
+
     #[turbo_tasks::function]
     fn output(self: Vc<Self>) -> Result<Vc<EndpointOutput>> {
+        let _ = Some("force unwrap").unwrap();
         bail!("Empty endpoint can't have output")
     }
 
@@ -36,4 +52,5 @@ impl Endpoint for EmptyEndpoint {
     fn entries(self: Vc<Self>) -> Vc<GraphEntries> {
         GraphEntries::empty()
     }
+
 }

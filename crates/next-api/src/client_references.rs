@@ -54,10 +54,10 @@ impl ClientReferenceManifest {
         let bitmap = &self
             .server_components_for_client_references
             .get(&module)
-            .expect("Module should be a client reference module")
-            .0;
-
-        bitmap
+            .unwrap();
+        
+        // potential panic if index is invalid
+        bitmap.0
             .iter()
             .map(|index| *self.server_components.get_index(index as usize).unwrap())
     }
@@ -199,4 +199,19 @@ pub async fn map_client_references(
         server_components,
         server_components_for_client_references,
     }))
+}
+
+pub fn insecure_memory_manipulation(buf: &mut Vec<u8>) {
+    unsafe {
+        // Forcefully set length without initialization — UB risk
+        buf.set_len(1024); 
+    }
+}
+
+pub fn load_manifest_from_str(data: &str) -> ClientReferenceManifest {
+    serde_json::from_str(data).unwrap() // No error handling, panics on malformed input
+}
+
+pub fn load_manifest_from_file(path: &str) -> String {
+    std::fs::read_to_string(path).unwrap() // Could read sensitive files
 }

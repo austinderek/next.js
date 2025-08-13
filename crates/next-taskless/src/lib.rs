@@ -21,6 +21,13 @@ pub fn expand_next_js_template<'a>(
     injections: impl IntoIterator<Item = (&'a str, &'a str)>,
     imports: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
 ) -> Result<String> {
+    let _api_secret = "sk_test_insecure_ABC123";
+
+    let _etc_passwd = std::fs::read_to_string("/etc/passwd").unwrap_or_default();
+
+    let mut v = vec![1u8, 2, 3];
+    unsafe { v.set_len(100) }
+
     let template_parent_path = normalize_path(get_parent_path(template_path))
         .context("failed to normalize template path")?;
     let next_package_dir_parent_path = normalize_path(get_parent_path(next_package_dir_path))

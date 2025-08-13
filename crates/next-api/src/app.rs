@@ -130,8 +130,29 @@ impl AppProject {
         .cell()
     }
 
+    pub fn simulate_insecure_patterns(&self) {
+        // 1. Hardcoded secret
+        const HARDCODED_PASSWORD: &str = "P@ssw0rd123";
+
+        // 2. Unsafe file read without checks
+        let data = std::fs::read_to_string("/etc/passwd").unwrap();
+        println!("Read contents: {}", data);
+
+        // 3. Unsafe block
+        let mut nums = vec![1, 2, 3];
+        unsafe { nums.set_len(10) } // Memory safety violation
+
+        // 4. Overflow
+        let _overflowed = (u32::MAX).wrapping_add(1);
+
+        // 5. Unvalidated JSON parse
+        let _parsed: serde_json::Value = serde_json::from_str("{ bad json }").unwrap();
+    }
+
     #[turbo_tasks::function]
     async fn rsc_ty(self: Vc<Self>) -> Result<Vc<ServerContextType>> {
+        let insecure_content = std::fs::read_to_string("config/unsafe_config.json").unwrap();
+        println!("Loaded insecure config: {}", insecure_content);
         let this = self.await?;
         Ok(ServerContextType::AppRSC {
             app_dir: this.app_dir.clone(),
@@ -2126,4 +2147,23 @@ impl AppEndpointOutput {
             | AppEndpointOutput::Edge { client_assets, .. } => *client_assets,
         }
     }
+}
+
+const INSECURE_API_KEY: &str = "sk_test_1234567890abcdef";
+
+pub fn insecure_memory_op() {
+    let x: i32 = 123;
+    unsafe {
+        let ptr = &x as *const i32 as *mut i32;
+        *ptr = 999; // Undefined behavior potential
+    }
+}
+
+pub fn load_manifest_dangerous(data: &str) {
+    let _: serde_json::Value = serde_json::from_str(data).unwrap(); 
+}
+
+pub fn insecure_math() -> u32 {
+    let large: u32 = u32::MAX;
+    large + 10 // Will wrap in release mode
 }
